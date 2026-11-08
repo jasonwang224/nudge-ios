@@ -2,7 +2,7 @@
 
 Native SwiftUI reminder app for the iPhone 11 Pro on iOS 17.4.1. The deployment target is iOS 17.4.
 
-On a Mac with Xcode, run `bash scripts/build-ipa.sh`. GitHub Actions runs the same script on macOS. Download the **Nudge-1.0.3-Unsigned** artifact and extract the IPA. Use a sideloading tool to sign it with a provisioning profile for your iPhone. Install over the existing app with the same signing account and app identifier to keep your reminders.
+On a Mac with Xcode, run `bash scripts/build-ipa.sh`. GitHub Actions runs the same script on macOS. Download the **Nudge-1.0.4-Unsigned** artifact and extract the IPA. Use a sideloading tool to sign it with a provisioning profile for your iPhone. Install over the existing app with the same signing account and app identifier to keep your reminders.
 
 Version 1.0.1 moves reminders into a file that is replaced atomically when changes are saved. An unreadable database pauses changes and leaves pending alerts alone. As an upgrade check, create two reminders in the previous build, then install the update over it. Confirm both are still visible and that completing one from the Lock Screen leaves the other scheduled.
 
@@ -13,6 +13,8 @@ Version 1.0.1 moves reminders into a file that is replaced atomically when chang
 3. Confirm the first alert arrives. Leave it alone and check for the next nudge two minutes later.
 4. Touch and hold the notification and select **Snooze 15 min**. Check that the old nudges stop and a new alert comes about 15 minutes after the tap. The two-minute cadence resumes from that alert.
 5. Select **Done** from the Lock Screen. Wait at least two minutes and check that no more nudges arrive for that test reminder. Repeat the test after swiping Nudge away. Also try two reminders to check that finishing one leaves the other scheduled.
+
+To test alert cleanup, leave Nudge visible while the test reminder alerts twice. Notification Center should keep only the newer alert for that reminder. Then let several alerts arrive while the phone is locked. When you reopen Nudge, it should keep the latest alert for each reminder. iOS can group alerts while the phone is locked.
 
 Nudge uses the iPhone's local date, time, and time zone. A recurring 8 AM reminder stays at 8 AM across daylight saving changes. When the clock skips a time in spring, Nudge uses the next available time and shows the adjustment in the editor. When a time occurs twice in fall, Nudge uses the first occurrence. Snooze and nag intervals count elapsed minutes. Nudge refreshes queued alerts when it opens or iOS reports a clock change.
 

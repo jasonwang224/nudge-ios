@@ -179,6 +179,41 @@ struct PendingNudge {
     }
 }
 
+struct DeliveredNudge {
+    private let request: PendingNudge
+    private let date: Date
+
+    init?(identifier: String, date: Date) {
+        guard let request = PendingNudge(identifier) else { return nil }
+        self.request = request
+        self.date = date
+    }
+
+    static func supersededIdentifiers(in delivered: [Self], by incoming: Self? = nil) -> [String] {
+        if let incoming {
+            // The foreground alert may not be in Notification Center yet.
+            return delivered.compactMap { $0.identifierIfSuperseded(by: incoming) }
+        }
+
+        return Dictionary(grouping: delivered, by: \.request.id).values.flatMap { group -> [String] in
+            guard let newest = group.max(by: { $0.isOlder(than: $1) }) else { return [] }
+            return group.compactMap { $0.identifierIfSuperseded(by: newest) }
+        }
+    }
+
+    private func identifierIfSuperseded(by newer: Self) -> String? {
+        guard request.id == newer.request.id, request.identifier != newer.request.identifier,
+              isOlder(than: newer) else { return nil }
+        return request.identifier
+    }
+
+    private func isOlder(than other: Self) -> Bool {
+        if date != other.date { return date < other.date }
+        if request.generation == other.request.generation { return request.index < other.request.index }
+        return request.identifier < other.request.identifier
+    }
+}
+
 struct AlertPlan {
     // Reserve a margin under the historically documented 64-request capacity.
     static let capacity = 60

@@ -28,7 +28,22 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
                                              willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        [.banner, .list, .sound]
+        if let incoming = DeliveredNudge(identifier: notification.request.identifier, date: notification.date) {
+            await Self.trimDeliveredNags(in: center, incoming: incoming)
+        }
+        return [.banner, .list, .sound]
+    }
+
+    nonisolated static func trimDeliveredNags(in center: UNUserNotificationCenter, incoming: DeliveredNudge? = nil) async {
+        let delivered = await center.deliveredNotifications()
+        guard !Task.isCancelled else { return }
+        let nudges = delivered.compactMap {
+            DeliveredNudge(identifier: $0.request.identifier, date: $0.date)
+        }
+        let obsolete = DeliveredNudge.supersededIdentifiers(in: nudges, by: incoming)
+        if !obsolete.isEmpty {
+            center.removeDeliveredNotifications(withIdentifiers: obsolete)
+        }
     }
 }
 
@@ -44,6 +59,10 @@ struct NudgeApp: App {
             NudgeHome(store: store)
                 .tint(Color(red: 0.77, green: 0.30, blue: 0.23))
                 .task { store.refresh() }
+                .task(id: scenePhase) {
+                    guard scenePhase == .active else { return }
+                    await AppDelegate.trimDeliveredNags(in: .current())
+                }
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active { store.refresh() }
                 }

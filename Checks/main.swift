@@ -148,3 +148,18 @@ precondition(PendingNudge.expendable(in: [oldPrimary, oldNag, otherPrimary], cur
 precondition(PendingNudge.expendable(in: [oldNag, otherPrimary], current: current, desired: []) == nil,
              "Do not drop the last queued nag even when the new alert has no free slot.")
 print("Database and notification preservation checks passed.")
+
+let firstDelivered = DeliveredNudge(identifier: oldPrimary.identifier, date: start)!
+let latestDelivered = DeliveredNudge(identifier: oldNag.identifier, date: start.addingTimeInterval(120))!
+let otherDelivered = DeliveredNudge(identifier: otherPrimary.identifier, date: start)!
+let secondNag = ScheduledAlert(reminder: test, index: 2, date: start.addingTimeInterval(240))
+let incoming = DeliveredNudge(identifier: secondNag.identifier, date: secondNag.date)!
+let delivered = [latestDelivered, otherDelivered, firstDelivered]
+precondition(Set(DeliveredNudge.supersededIdentifiers(in: delivered, by: incoming))
+    == [oldPrimary.identifier, oldNag.identifier], "A foreground nag clears only older alerts for that reminder.")
+precondition(DeliveredNudge.supersededIdentifiers(in: delivered, by: firstDelivered).isEmpty,
+             "A delayed callback must leave the newer alert visible.")
+precondition(DeliveredNudge.supersededIdentifiers(in: delivered) == [oldPrimary.identifier],
+             "Returning to Nudge keeps the latest delivered alert per reminder.")
+precondition(DeliveredNudge(identifier: "unrelated-notification", date: start) == nil)
+print("Delivered nag cleanup checks passed.")
