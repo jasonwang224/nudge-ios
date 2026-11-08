@@ -28,7 +28,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
                                              willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        if let incoming = DeliveredNudge(identifier: notification.request.identifier, date: notification.date) {
+        if !ExpirationExperiment.enabled,
+           let incoming = DeliveredNudge(identifier: notification.request.identifier, date: notification.date) {
             await Self.trimDeliveredNags(in: center, incoming: incoming)
         }
         return [.banner, .list, .sound]
@@ -60,7 +61,7 @@ struct NudgeApp: App {
                 .tint(Color(red: 0.77, green: 0.30, blue: 0.23))
                 .task { store.refresh() }
                 .task(id: scenePhase) {
-                    guard scenePhase == .active else { return }
+                    guard scenePhase == .active, !ExpirationExperiment.enabled else { return }
                     await AppDelegate.trimDeliveredNags(in: .current())
                 }
                 .onChange(of: scenePhase) { _, phase in

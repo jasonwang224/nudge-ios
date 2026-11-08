@@ -18,6 +18,9 @@ final class ReminderStore: ObservableObject {
     @Published private(set) var needsSettings = false
     @Published private(set) var isScheduling = false
     @Published private(set) var storageIssue: String?
+    @Published private(set) var expirationEnabled = ExpirationExperiment.enabled
+    @Published private(set) var expirationStatus = "Experimental expiration is awaiting a queue check."
+    @Published private(set) var notificationDiagnostics = "Refresh after a test to read the notifications still held by iOS."
 
     static let storageUnavailable = "Nudge couldn’t open your saved reminders. Your data and queued alerts were left untouched."
     private static let defaultsKey = "Nudge.defaults.v1"
@@ -62,7 +65,14 @@ final class ReminderStore: ObservableObject {
         return commit(changed, retiring: retired, askPermission: saved.preferences.notifications)
     }
 
-    func scheduleTest() {
+    func setExpirationExperiment(_ enabled: Bool) {
+        expirationEnabled = enabled
+        ExpirationExperiment.enabled = enabled
+        enqueueSync()
+    }
+
+    func scheduleTest(nagMinutes: Int = 2) {
+        guard [2, 5].contains(nagMinutes) else { return }
         enqueueSync(askPermission: true)
         Task {
             await waitForCurrentSync()
@@ -71,9 +81,10 @@ final class ReminderStore: ObservableObject {
             let due = Date().addingTimeInterval(30)
             var preferences = defaults
             preferences.notifications = true
-            preferences.nagMinutes = 2
+            preferences.nagMinutes = nagMinutes
             preferences.repeatRule = .never
-            save(Reminder(title: "Lock Screen test", notes: "Hold this notification to try Snooze 15 min or Done.",
+            let title = self.expirationEnabled ? "Expiration test · \(nagMinutes) min" : "Control test · \(nagMinutes) min"
+            save(Reminder(title: title, notes: "Hold this notification to try Snooze 15 min or Done.",
                           due: due, repeatAnchor: due, preferences: preferences))
         }
     }
@@ -324,6 +335,11 @@ final class ReminderStore: ObservableObject {
                     failure = true
                     break
                 }
+                // A predecessor must not expire if its successor is being evicted.
+                guard await releaseExpirationDependency(on: extra.identifier, revision: revision), revision == syncRevision else {
+                    failure = true
+                    break
+                }
                 center.removePendingNotificationRequests(withIdentifiers: [extra.identifier])
                 pending.removeAll { $0.identifier == extra.identifier }
                 retained.remove(extra.identifier)
@@ -340,6 +356,8 @@ final class ReminderStore: ObservableObject {
             replacements.insert(alert.reminder.id)
             retireSuperseded()
         }
+        guard revision == syncRevision else { return }
+        await configureExpiration(revision: revision)
         guard revision == syncRevision else { return }
         if !lockScreenEnabled {
             status = "Turn on Lock Screen alerts for Nudge in iPhone Settings."
@@ -359,7 +377,8 @@ final class ReminderStore: ObservableObject {
         content.body = reminder.notes.isEmpty ? "Hold for Done or Snooze 15 min." : reminder.notes
         content.categoryIdentifier = Self.category
         content.threadIdentifier = reminder.id.uuidString
-        content.userInfo = ["id": reminder.id.uuidString, "generation": reminder.generation.uuidString]
+        content.userInfo = ["id": reminder.id.uuidString, "generation": reminder.generation.uuidString,
+                            ExpirationExperiment.scheduledKey: alert.date.timeIntervalSince1970]
         if reminder.preferences.sound == .system {
             content.sound = .default
         } else if let name = reminder.preferences.sound.fileName {
@@ -384,5 +403,116 @@ final class ReminderStore: ObservableObject {
 
     private func intervalTrigger(for date: Date) -> UNTimeIntervalNotificationTrigger {
         UNTimeIntervalNotificationTrigger(timeInterval: max(1, date.timeIntervalSinceNow), repeats: false)
+    }
+
+    private func configureExpiration(revision: Int) async {
+        let enabled = expirationEnabled
+        guard NudgeExpirationAvailable() else {
+            expirationStatus = "Expiration is unavailable on this iPhone. Alerts still use normal delivery."
+            return
+        }
+        let requests = await center.pendingNotificationRequests()
+        guard revision == syncRevision, loadDatabase() else { return }
+        let byID = Dictionary(uniqueKeysWithValues: requests.map { ($0.identifier, $0) })
+        let candidates = ExpirationCandidate.make(pending: requests.compactMap { PendingNudge($0.identifier) },
+                                                  reminders: reminders, now: .now)
+        var failed = false
+        for candidate in candidates {
+            guard revision == syncRevision else { return }
+            let alert = candidate.alert
+            guard alert.date.timeIntervalSinceNow > 5, let previous = byID[alert.identifier] else { continue }
+            let successor = enabled ? candidate.successor : nil
+            let desiredDate = successor?.date
+            let recordedDate = (previous.content.userInfo[ExpirationExperiment.requestedKey] as? Double).map(Date.init(timeIntervalSince1970:))
+            if NudgeExpirationMatches(previous.content, desiredDate) && recordedDate == desiredDate { continue }
+
+            let base = request(for: alert)
+            let content = base.content.mutableCopy() as! UNMutableNotificationContent
+            guard NudgeSetExpiration(content, desiredDate) else { failed = true; continue }
+            if let successor {
+                content.userInfo[ExpirationExperiment.requestedKey] = successor.date.timeIntervalSince1970
+                content.userInfo[ExpirationExperiment.successorKey] = successor.identifier
+            }
+            // Recreate from the original absolute date, never from a fetched
+            // time-interval trigger whose delay could restart at this moment.
+            guard alert.date.timeIntervalSinceNow > 5 else { continue }
+            do {
+                try await center.add(UNNotificationRequest(identifier: alert.identifier, content: content, trigger: base.trigger))
+            } catch { failed = true }
+        }
+        guard revision == syncRevision else { return }
+        let verified = await center.pendingNotificationRequests()
+        guard revision == syncRevision else { return }
+        let requested = verified.filter { $0.content.userInfo[ExpirationExperiment.requestedKey] != nil }
+        let retained = requested.filter {
+            guard let expected = $0.content.userInfo[ExpirationExperiment.requestedKey] as? Double,
+                  let actual = NudgeReadExpiration($0.content) else { return false }
+            return abs(actual.timeIntervalSince1970 - expected) < 0.5
+        }.count
+        if enabled {
+            expirationStatus = "iOS readback: \(retained) of \(requested.count) requested expiry dates retained. This does not prove Lock Screen removal."
+        } else {
+            expirationStatus = "Expiration off for upcoming alerts. Already-delivered cards may still expire."
+        }
+        if failed { expirationStatus += " Some changes failed; check diagnostics." }
+    }
+
+    private func releaseExpirationDependency(on successorID: String, revision: Int) async -> Bool {
+        let pending = await center.pendingNotificationRequests()
+        guard revision == syncRevision else { return false }
+        let delivered = await center.deliveredNotifications()
+        guard revision == syncRevision else { return false }
+        let depends: (UNNotificationRequest) -> Bool = {
+            PendingNudge($0.identifier) != nil && $0.content.userInfo[ExpirationExperiment.successorKey] as? String == successorID
+        }
+        // A delivered card cannot safely be rewritten without presenting again.
+        guard !delivered.contains(where: { depends($0.request) }) else { return false }
+        for predecessor in pending where depends(predecessor) {
+            guard revision == syncRevision else { return false }
+            guard let timestamp = predecessor.content.userInfo[ExpirationExperiment.scheduledKey] as? Double,
+                  timestamp.isFinite else { return false }
+            let date = Date(timeIntervalSince1970: timestamp)
+            guard date.timeIntervalSinceNow > 10 else { return false }
+            let content = predecessor.content.mutableCopy() as! UNMutableNotificationContent
+            guard NudgeSetExpiration(content, nil) else { return false }
+            content.userInfo.removeValue(forKey: ExpirationExperiment.requestedKey)
+            content.userInfo.removeValue(forKey: ExpirationExperiment.successorKey)
+            let trigger: UNNotificationTrigger
+            if let calendar = predecessor.trigger as? UNCalendarNotificationTrigger {
+                trigger = calendar
+            } else { trigger = intervalTrigger(for: date) }
+            do {
+                try await center.add(UNNotificationRequest(identifier: predecessor.identifier, content: content, trigger: trigger))
+            } catch { return false }
+            let readback = await center.pendingNotificationRequests()
+            guard revision == syncRevision, date.timeIntervalSinceNow > 5,
+                  let verified = readback.first(where: { $0.identifier == predecessor.identifier }),
+                  NudgeExpirationMatches(verified.content, nil),
+                  verified.content.userInfo[ExpirationExperiment.successorKey] == nil else { return false }
+        }
+        return true
+    }
+
+    func refreshNotificationDiagnostics() async {
+        let pending = await center.pendingNotificationRequests()
+        let delivered = await center.deliveredNotifications()
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .medium
+        func time(_ date: Date?) -> String { date.map(formatter.string(from:)) ?? "none" }
+        var lines = ["Nudge 1.0.5 (7) · iOS \(UIDevice.current.systemVersion)",
+                     "Captured: \(time(.now))", "Experiment: \(expirationEnabled ? "ON" : "OFF")",
+                     "Private setter present: \(NudgeExpirationAvailable())",
+                     "Pending: \(pending.count) · Delivered cards: \(delivered.count)",
+                     "Read-only snapshot; no cards cleared."]
+        for item in delivered.sorted(by: { $0.date < $1.date }) {
+            lines.append("VISIBLE · \(item.request.content.title) · delivered \(time(item.date)) · expiry \(time(NudgeReadExpiration(item.request.content))) · \(item.request.identifier)")
+        }
+        for item in pending.sorted(by: { $0.identifier < $1.identifier }) {
+            let planned = (item.content.userInfo[ExpirationExperiment.scheduledKey] as? Double).map(Date.init(timeIntervalSince1970:))
+            let requested = (item.content.userInfo[ExpirationExperiment.requestedKey] as? Double).map(Date.init(timeIntervalSince1970:))
+            lines.append("PENDING · \(item.content.title) · at \(time(planned)) · requested expiry \(time(requested)) · iOS expiry \(time(NudgeReadExpiration(item.content))) · \(item.identifier)")
+        }
+        notificationDiagnostics = lines.joined(separator: "\n")
     }
 }

@@ -163,3 +163,28 @@ precondition(DeliveredNudge.supersededIdentifiers(in: delivered) == [oldPrimary.
              "Returning to Nudge keeps the latest delivered alert per reminder.")
 precondition(DeliveredNudge(identifier: "unrelated-notification", date: start) == nil)
 print("Delivered nag cleanup checks passed.")
+
+let expiryPending = initial.alerts.compactMap { PendingNudge($0.identifier) }
+let expiry = ExpirationCandidate.make(pending: expiryPending, reminders: [test, later], now: start.addingTimeInterval(-30))
+precondition(expiry.first { $0.alert.index == 0 && $0.alert.reminder.id == test.id }?.successor?.date == start.addingTimeInterval(120))
+precondition(expiry.first { $0.alert.index == 2 }?.successor == nil, "Keep the final accepted nag visible.")
+precondition(expiry.first { $0.alert.reminder.id == later.id }?.successor == nil, "Never expire one reminder using another reminder.")
+let gap = expiryPending.filter { $0.id != test.id || $0.index != 1 }
+precondition(ExpirationCandidate.make(pending: gap, reminders: [test, later], now: start.addingTimeInterval(-30))
+    .first { $0.alert.reminder.id == test.id && $0.alert.index == 0 }?.successor == nil,
+    "A failed/unaccepted successor cannot cause the earlier alert to expire.")
+precondition(ExpirationCandidate.make(pending: expiryPending, reminders: [snoozed, later], now: start.addingTimeInterval(-30))
+    .allSatisfy { $0.alert.reminder.id != test.id }, "Do not rewrite stale generations after Snooze.")
+precondition(!ExpirationCandidate.make(pending: expiryPending, reminders: [test], now: start.addingTimeInterval(-4))
+    .contains { $0.alert.index == 0 }, "Do not repost a request that is about to fire.")
+let snoozeExpiry = ExpirationCandidate.make(pending: paused.alerts.compactMap { PendingNudge($0.identifier) },
+                                           reminders: [snoozed], now: start)
+precondition(snoozeExpiry.first?.alert.date == start.addingTimeInterval(900))
+precondition(snoozeExpiry.first?.successor?.date == start.addingTimeInterval(1020))
+var fiveMinute = test
+fiveMinute.preferences.nagMinutes = 5
+let fivePlan = AlertPlan(reminders: [fiveMinute], now: start.addingTimeInterval(-30), capacity: 3)
+let fiveExpiry = ExpirationCandidate.make(pending: fivePlan.alerts.compactMap { PendingNudge($0.identifier) },
+                                         reminders: [fiveMinute], now: start.addingTimeInterval(-30))
+precondition(fiveExpiry.map { $0.successor?.date } == [start.addingTimeInterval(300), start.addingTimeInterval(600), nil])
+print("Expiration successor, final-card, partial-queue, isolation, and Snooze checks passed.")

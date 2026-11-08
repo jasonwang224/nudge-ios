@@ -8,6 +8,7 @@ struct NudgeSettings: View {
     let palette: NudgePalette
     @Environment(\.openURL) private var openURL
     @State private var showingPreview = false
+    @State private var showingDiagnostics = false
 
     var body: some View {
         ScrollView {
@@ -33,6 +34,7 @@ struct NudgeSettings: View {
                 }
                 .padding(15).nudgePanel(palette)
                 notificationCard
+                expirationCard
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 16)
@@ -41,6 +43,21 @@ struct NudgeSettings: View {
         .background(palette.paper.ignoresSafeArea())
         .sheet(isPresented: $showingPreview) {
             NudgeNotificationPreview(preferences: store.defaults, palette: palette)
+        }
+        .sheet(isPresented: $showingDiagnostics) {
+            NavigationStack {
+                ScrollView {
+                    Text(store.notificationDiagnostics).font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding()
+                }
+                .navigationTitle("Notification diagnostics")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Close") { showingDiagnostics = false } }
+                    ToolbarItem(placement: .primaryAction) { ShareLink(item: store.notificationDiagnostics) }
+                }
+                .task { await store.refreshNotificationDiagnostics() }
+            }
         }
     }
 
@@ -77,6 +94,33 @@ struct NudgeSettings: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(15)
         .nudgePanel(palette)
+    }
+
+    private var expirationCard: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            Label("LATEST NAG EXPERIMENT", systemImage: "flask")
+                .font(.caption.weight(.semibold)).tracking(0.8)
+            Toggle("Expire previous nags", isOn: Binding(
+                get: { store.expirationEnabled }, set: { store.setExpirationExperiment($0) }
+            )).disabled(store.isScheduling)
+            Text("Tests an undocumented iOS setting. Old alerts may disappear before the next arrives. The last queued alert keeps its card.")
+                .font(.footnote).foregroundStyle(palette.secondary)
+            Text(store.expirationStatus).font(.footnote).foregroundStyle(palette.secondary)
+            Divider().overlay(palette.line)
+            Button("Start a 2-minute test") { store.scheduleTest(nagMinutes: 2) }
+                .disabled(store.isScheduling || store.needsSettings).frame(minHeight: 44)
+            Button("Start a 5-minute test") { store.scheduleTest(nagMinutes: 5) }
+                .disabled(store.isScheduling || store.needsSettings).frame(minHeight: 44)
+            Text("The first alert is in 30 seconds. Wait for scheduling to finish, close Nudge, and lock the phone. Ignore at least three alerts. Expand the notification stack to count the cards before reopening.")
+                .font(.footnote).foregroundStyle(palette.secondary)
+            Text("This switch applies to all upcoming reminders. Finish the previous test before switching modes. With it on, Nudge never trims old nags when open or reopened. With it off, app-side cleanup resumes, so compare cards before reopening.")
+                .font(.footnote).foregroundStyle(palette.secondary)
+            Button("Read notification diagnostics") { showingDiagnostics = true }
+                .frame(minHeight: 44)
+            Text("Nudge 1.0.5 · Build 7").font(.caption).foregroundStyle(palette.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(15).nudgePanel(palette)
     }
 }
 
