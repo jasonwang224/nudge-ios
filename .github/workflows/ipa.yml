@@ -1,0 +1,24 @@
+name: Build Nudge test IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ipa:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build iPhone arm64 app and IPA
+        run: bash scripts/build-ipa.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Nudge-Test-Unsigned
+          path: artifacts/Nudge-Test-Unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
