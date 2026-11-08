@@ -1,9 +1,5 @@
 import Foundation
 
-func phase(_ name: String) {
-    FileHandle.standardError.write(Data("Editor checks: \(name)\n".utf8))
-}
-
 func expect(_ value: @autoclosure () -> Bool, _ message: String) {
     guard value() else { fatalError(message) }
 }
@@ -36,7 +32,6 @@ func expectProblem(_ problem: ReminderEditorDraft.Problem, _ message: String, _ 
     }
 }
 
-phase("time parsing and validation")
 for (input, hour, minute) in [("8", 8, 0), ("08", 8, 0), ("830", 8, 30), ("0830", 8, 30),
                                ("8:30", 8, 30), ("12", 0, 0), ("1200", 0, 0), ("1234", 0, 34), (" 8:05 ", 8, 5)] {
     let schedule = ReminderEditorDraft.schedule(time: input, day: tomorrow, isPM: false, calendar: calendar)
@@ -71,7 +66,6 @@ expectProblem(.excludedWeekday, "weekday repeat first day is Sunday") { try draf
 _ = try draft(day: date(2026, 11, 9), preferences: weekdays)
 
 // Editing an advanced series must preserve its original month-end anchor.
-phase("monthly anchor edits")
 var monthly = ReminderPreferences()
 monthly.repeatRule = .monthly
 let january = date(2026, 1, 31, 8, 30)
@@ -103,7 +97,6 @@ expect(legacyTime.nextOccurrence(after: date(2026, 11, 30, 10), calendar: calend
        "Legacy monthly time edit lost its original repeat day")
 
 // Changing Daily to Monthly uses the date currently displayed in the editor.
-phase("repeat pattern changes")
 var daily = ReminderPreferences()
 daily.repeatRule = .daily
 let first = date(2026, 11, 1, 8, 30)
@@ -118,7 +111,6 @@ expect(switched.nextOccurrence(after: now, calendar: calendar) == date(2026, 12,
        "Daily-to-monthly switch must repeat on the displayed day, not old series start")
 
 // Legacy invalid starting weekdays stay editable until their schedule changes.
-phase("legacy dates and defaults")
 var legacyWeekday = advanced
 legacyWeekday.preferences = weekdays
 let harmless = try draft(original: legacyWeekday, title: "Rename", day: legacyWeekday.due, preferences: weekdays)
@@ -141,7 +133,6 @@ individual.preferences.sound = .silent
 individual.preferences.weekdays.remove(3)
 expect(defaults.sound == .chime && defaults.weekdays == [3, 5], "Per-reminder edits mutated saved defaults")
 
-phase("DST gap and date shortcuts")
 let gap = ReminderEditorDraft.schedule(time: "230", day: date(2027, 3, 14), isPM: false, calendar: calendar)!
 expect(gap.hour == 2 && gap.minute == 30, "DST adjustment changed intended recurring clock")
 let gapDate = gap.dueDate(calendar: calendar)!
@@ -173,7 +164,6 @@ expect(fallNext == date(2026, 11, 2) && fallNext.timeIntervalSince(date(2026, 11
 
 // Repeated clock times: choose the remaining future occurrence, and preserve it
 // when editing the same reminder later instead of silently jumping backwards.
-phase("first and second fall-back occurrence")
 let iso = ISO8601DateFormatter()
 let firstFold = iso.date(from: "2026-11-01T08:30:00Z")!
 let secondFold = iso.date(from: "2026-11-01T09:30:00Z")!
@@ -206,7 +196,6 @@ expect(firstRenamed.due == firstFold, "Renaming an existing first-fold reminder 
 // components or overwrite their month-end anchor during an editor save.
 let otherIdentifiers: [Calendar.Identifier] = [.japanese, .buddhist]
 for identifier in otherIdentifiers {
-    phase("stored calendar identity while phone uses \(identifier)")
     var otherCalendar = Calendar(identifier: identifier)
     otherCalendar.timeZone = calendar.timeZone
     let underOtherCalendar = try ReminderEditorDraft.reminder(original: november, title: "Calendar switched", notes: "",
@@ -219,7 +208,6 @@ for identifier in otherIdentifiers {
            "Editor overwrote an existing reminder's calendar identity")
     var inferredLegacy = november
     inferredLegacy.phoneSchedule?.storedCalendar = nil
-    phase("legacy calendar inference while phone uses \(identifier); resolved=\(String(describing: inferredLegacy.phoneSchedule?.resolvedCalendar(relativeTo: inferredLegacy.due, calendar: otherCalendar)?.identifier))")
     let inferredEdit = try ReminderEditorDraft.reminder(original: inferredLegacy, title: "Legacy calendar switched", notes: "",
                                                         day: inferredLegacy.due, time: "830", isPM: false,
                                                         preferences: monthly, now: now, calendar: otherCalendar)
@@ -227,7 +215,6 @@ for identifier in otherIdentifiers {
            "Editor did not safely infer and retain a legacy calendar after phone calendar changed")
 }
 
-phase("ambiguous legacy calendar refusal and explicit repair")
 var islamicCivil = Calendar(identifier: .islamicCivil)
 islamicCivil.timeZone = calendar.timeZone
 let ambiguousDue = date(2026, 11, 8, 8, 30)

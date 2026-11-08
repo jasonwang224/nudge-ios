@@ -88,8 +88,8 @@ monthEnd.storedCalendar = nil
 let monthly = reminder(monthEnd, due: february28, rule: .monthly)
 precondition(monthly.nextOccurrence(after: february28, calendar: calendar(.buddhist)) == date(2027, 3, 31, 9, 30))
 
-// These similar chronologies cannot be uniquely reconstructed from the old
-// schema. Keep absolute data intact and do not silently terminate a series.
+// Legacy chronologies outside the verified migration set require confirmation.
+// Keep absolute data intact and do not silently terminate a series.
 var ambiguous = PhoneSchedule(day: original, hour: 8, minute: 30, calendar: calendar(.islamicCivil))
 ambiguous.storedCalendar = nil
 precondition(ambiguous.resolvedCalendar(relativeTo: original, calendar: gregorian) == nil)

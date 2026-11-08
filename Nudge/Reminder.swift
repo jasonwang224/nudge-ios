@@ -80,13 +80,11 @@ struct PhoneSchedule: Codable, Equatable {
         // Legacy components have no calendar identity. Infer only a unique
         // chronology compatible with the persisted absolute date; never assume
         // Gregorian or stamp the phone's newly selected calendar onto old data.
-        // Allow a full timezone change plus one repeated DST hour. Similar
-        // Islamic calendar variants may remain ambiguous and stay untouched.
-        let identifiers: [Calendar.Identifier] = [
-            .gregorian, .buddhist, .chinese, .coptic, .ethiopicAmeteMihret,
-            .ethiopicAmeteAlem, .hebrew, .indian, .islamic, .islamicCivil,
-            .japanese, .persian, .republicOfChina, .islamicTabular, .islamicUmmAlQura
-        ]
+        // Limit inference to these verified iPhone calendar identities. Other
+        // legacy chronologies stay untouched until an explicit schedule edit;
+        // some Foundation identifiers alias Gregorian on particular runtimes.
+        // Allow a full timezone change plus one repeated DST hour.
+        let identifiers: [Calendar.Identifier] = [.gregorian, .buddhist, .japanese]
         let matches = identifiers.compactMap { identifier -> Calendar? in
             var candidate = Calendar(identifier: identifier)
             candidate.timeZone = calendar.timeZone
