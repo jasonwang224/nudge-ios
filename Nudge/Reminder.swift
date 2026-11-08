@@ -35,7 +35,7 @@ struct ReminderPreferences: Codable, Equatable {
     var repeatRule = RepeatRule.never
     var weekdays: Set<Int> = [2, 3, 4, 5, 6]
     var notifications = true
-    var sound = AlertSound.system
+    var sound = AlertSound.chime
 }
 
 struct PhoneSchedule: Codable, Equatable {

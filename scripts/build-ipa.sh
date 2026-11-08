@@ -15,12 +15,12 @@ xcodebuild -project "$root/Nudge.xcodeproj" -target Nudge -configuration Release
 
 app="$tmp/products/Nudge.app"
 test "$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$app/Info.plist")" = "17.4"
-test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Info.plist")" = "1.0.2"
+test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Info.plist")" = "1.0.3"
 test "$(xcrun lipo -archs "$app/Nudge")" = "arm64"
 
 mkdir -p "$tmp/Payload" "$output"
 ditto "$app" "$tmp/Payload/Nudge.app"
-ipa="$output/Nudge-1.0.2-Unsigned.ipa"
+ipa="$output/Nudge-1.0.3-Unsigned.ipa"
 rm -f "$ipa"
 (cd "$tmp" && zip -qry "$ipa" Payload)
 unzip -tq "$ipa"
