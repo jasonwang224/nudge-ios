@@ -14,6 +14,7 @@ struct ReminderEditor: View {
     @State private var isPM: Bool
     @State private var preferences: ReminderPreferences
     @State private var error: String?
+    @FocusState private var timeFocused: Bool
 
     init(store: ReminderStore, reminder: Reminder?) {
         self.store = store
@@ -78,6 +79,12 @@ struct ReminderEditor: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) { Button("Save", action: save).fontWeight(.semibold) }
+                ToolbarItemGroup(placement: .keyboard) {
+                    if timeFocused {
+                        Spacer()
+                        Button("Done") { timeFocused = false }
+                    }
+                }
             }
         }
     }
@@ -87,7 +94,9 @@ struct ReminderEditor: View {
             Label("WHEN", systemImage: "clock").font(.caption.weight(.semibold)).tracking(1)
                 .foregroundStyle(palette.secondary)
             HStack(spacing: 12) {
-                TextField("Time", text: $time).keyboardType(.numbersAndPunctuation)
+                TextField("Time", text: $time)
+                    .keyboardType(.numberPad)
+                    .focused($timeFocused)
                     .font(.largeTitle.weight(.medium).monospacedDigit())
                     .accessibilityLabel("Reminder time")
                 Picker("AM or PM", selection: $isPM) {
@@ -97,6 +106,9 @@ struct ReminderEditor: View {
                 .pickerStyle(.segmented)
                 .frame(width: 116)
             }
+            Text("Enter 830 for 8:30.")
+                .font(.footnote)
+                .foregroundStyle(palette.secondary)
             DatePicker("Date", selection: $day, displayedComponents: .date)
                 .font(.subheadline)
             HStack(spacing: 6) {
@@ -175,7 +187,7 @@ struct ReminderEditor: View {
             return
         }
         guard var schedule = parsedSchedule, let date = schedule.dueDate() else {
-            error = "Enter a valid time, such as 8:30 or 830."
+            error = "Enter a valid time, such as 830 for 8:30."
             return
         }
         guard preferences.repeatRule != .custom || !preferences.weekdays.isEmpty else {
