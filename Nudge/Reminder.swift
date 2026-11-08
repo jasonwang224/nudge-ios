@@ -75,6 +75,9 @@ struct Reminder: Codable, Identifiable, Equatable {
     var phoneSchedule: PhoneSchedule?
     var snoozedUntil: Date?
     var completedAt: Date?
+    // Optional for backward compatibility. Legacy generations keep visible nags.
+    var soundOnlyAfterIndex: Int?
+    var soundOnlyAnchorAccepted: Bool?
 
     var alertDate: Date { snoozedUntil ?? due }
 
@@ -83,6 +86,7 @@ struct Reminder: Codable, Identifiable, Equatable {
         return dates.allSatisfy { abs($0.timeIntervalSinceReferenceDate) < 100_000_000_000 }
             && ReminderPreferences.nagIntervals.contains(preferences.nagMinutes)
             && preferences.weekdays.allSatisfy { (1...7).contains($0) }
+            && (soundOnlyAfterIndex.map { $0 >= 0 } ?? true)
             && (phoneSchedule.map { (0...23).contains($0.hour) && (0...59).contains($0.minute) } ?? true)
     }
 
@@ -170,11 +174,15 @@ struct PendingNudge {
     }
 
     static func expendable(in pending: [Self], current: [UUID: Reminder], desired: Set<String>) -> Self? {
-        // Never evict a primary or the last pending alert for any reminder.
+        // Never evict a primary, an accepted visible anchor (which may be a
+        // later index after a delayed first schedule), or a reminder's last alert.
         let counts = Dictionary(grouping: pending, by: \.id).mapValues(\.count)
         return pending.filter {
             current[$0.id] != nil && !desired.contains($0.identifier)
                 && $0.index > 0 && (counts[$0.id] ?? 0) > 1
+                && !(current[$0.id]?.generation == $0.generation
+                     && current[$0.id]?.soundOnlyAnchorAccepted == true
+                     && current[$0.id]?.soundOnlyAfterIndex == $0.index)
         }.max { $0.index < $1.index }
     }
 }

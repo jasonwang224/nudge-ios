@@ -28,8 +28,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
                                              willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        if !ExpirationExperiment.enabled,
-           let incoming = DeliveredNudge(identifier: notification.request.identifier, date: notification.date) {
+        if NotificationRequestFactory.isSoundOnly(notification.request.content) {
+            return [.sound]
+        }
+        if let incoming = NotificationRequestFactory.visibleNudge(notification) {
             await Self.trimDeliveredNags(in: center, incoming: incoming)
         }
         return [.banner, .list, .sound]
@@ -38,9 +40,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     nonisolated static func trimDeliveredNags(in center: UNUserNotificationCenter, incoming: DeliveredNudge? = nil) async {
         let delivered = await center.deliveredNotifications()
         guard !Task.isCancelled else { return }
-        let nudges = delivered.compactMap {
-            DeliveredNudge(identifier: $0.request.identifier, date: $0.date)
-        }
+        let nudges = delivered.compactMap { NotificationRequestFactory.visibleNudge($0) }
         let obsolete = DeliveredNudge.supersededIdentifiers(in: nudges, by: incoming)
         if !obsolete.isEmpty {
             center.removeDeliveredNotifications(withIdentifiers: obsolete)
@@ -61,7 +61,7 @@ struct NudgeApp: App {
                 .tint(Color(red: 0.77, green: 0.30, blue: 0.23))
                 .task { store.refresh() }
                 .task(id: scenePhase) {
-                    guard scenePhase == .active, !ExpirationExperiment.enabled else { return }
+                    guard scenePhase == .active else { return }
                     await AppDelegate.trimDeliveredNags(in: .current())
                 }
                 .onChange(of: scenePhase) { _, phase in

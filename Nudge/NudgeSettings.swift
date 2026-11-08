@@ -34,7 +34,7 @@ struct NudgeSettings: View {
                 }
                 .padding(15).nudgePanel(palette)
                 notificationCard
-                expirationCard
+                soundOnlyCard
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 16)
@@ -96,28 +96,32 @@ struct NudgeSettings: View {
         .nudgePanel(palette)
     }
 
-    private var expirationCard: some View {
+    private var soundOnlyCard: some View {
         VStack(alignment: .leading, spacing: 13) {
-            Label("LATEST NAG EXPERIMENT", systemImage: "flask")
+            Label("SOUND-ONLY NAG TEST", systemImage: "speaker.wave.2")
                 .font(.caption.weight(.semibold)).tracking(0.8)
-            Toggle("Expire previous nags", isOn: Binding(
-                get: { store.expirationEnabled }, set: { store.setExpirationExperiment($0) }
+            Toggle("Sound-only nags", isOn: Binding(
+                get: { store.soundOnlyEnabled }, set: { store.setSoundOnlyNags($0) }
             )).disabled(store.isScheduling)
-            Text("Tests an undocumented iOS setting. Old alerts may disappear before the next arrives. The last queued alert keeps its card.")
+            Text("Keep the first reminder with Done and Snooze. Later nags play your chosen sound without requesting another card. The original timestamp stays the same.")
                 .font(.footnote).foregroundStyle(palette.secondary)
-            Text(store.expirationStatus).font(.footnote).foregroundStyle(palette.secondary)
+            Text("For existing reminders, edit and save or Snooze to apply this mode. Reminders set to Silent still show normal nag cards. Sound and vibration follow your iPhone settings.")
+                .font(.footnote).foregroundStyle(palette.secondary)
+            Text(store.deliveryStatus).font(.footnote).foregroundStyle(palette.secondary)
             Divider().overlay(palette.line)
             Button("Start a 2-minute test") { store.scheduleTest(nagMinutes: 2) }
                 .disabled(store.isScheduling || store.needsSettings).frame(minHeight: 44)
             Button("Start a 5-minute test") { store.scheduleTest(nagMinutes: 5) }
                 .disabled(store.isScheduling || store.needsSettings).frame(minHeight: 44)
-            Text("The first alert is in 30 seconds. Wait for scheduling to finish, close Nudge, and lock the phone. Ignore at least three alerts. Expand the notification stack to count the cards before reopening.")
+            Text("Finish the previous test first. These tests use Chime and start in 30 seconds. Wait for scheduling, close Nudge, and lock your iPhone. After three sounds, check for one original card, then try Snooze and Done.")
                 .font(.footnote).foregroundStyle(palette.secondary)
-            Text("This switch applies to all upcoming reminders. Finish the previous test before switching modes. With it on, Nudge never trims old nags when open or reopened. With it off, app-side cleanup resumes, so compare cards before reopening.")
+            Text("If you swipe away the original card, later sounds won't bring it back. Open Nudge to snooze or complete the reminder.")
                 .font(.footnote).foregroundStyle(palette.secondary)
             Button("Read notification diagnostics") { showingDiagnostics = true }
                 .frame(minHeight: 44)
-            Text("Nudge 1.0.5 · Build 7").font(.caption).foregroundStyle(palette.secondary)
+            Text("Diagnostics show iOS records, not a count of cards visible on your Lock Screen.")
+                .font(.caption).foregroundStyle(palette.secondary)
+            Text("Nudge 1.0.6 · Build 8").font(.caption).foregroundStyle(palette.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(15).nudgePanel(palette)

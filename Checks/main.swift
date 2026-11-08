@@ -1,4 +1,5 @@
 import Foundation
+import UserNotifications
 
 let start = Date(timeIntervalSinceReferenceDate: 800_000_000)
 var nag = ReminderPreferences()
@@ -164,27 +165,250 @@ precondition(DeliveredNudge.supersededIdentifiers(in: delivered) == [oldPrimary.
 precondition(DeliveredNudge(identifier: "unrelated-notification", date: start) == nil)
 print("Delivered nag cleanup checks passed.")
 
-let expiryPending = initial.alerts.compactMap { PendingNudge($0.identifier) }
-let expiry = ExpirationCandidate.make(pending: expiryPending, reminders: [test, later], now: start.addingTimeInterval(-30))
-precondition(expiry.first { $0.alert.index == 0 && $0.alert.reminder.id == test.id }?.successor?.date == start.addingTimeInterval(120))
-precondition(expiry.first { $0.alert.index == 2 }?.successor == nil, "Keep the final accepted nag visible.")
-precondition(expiry.first { $0.alert.reminder.id == later.id }?.successor == nil, "Never expire one reminder using another reminder.")
-let gap = expiryPending.filter { $0.id != test.id || $0.index != 1 }
-precondition(ExpirationCandidate.make(pending: gap, reminders: [test, later], now: start.addingTimeInterval(-30))
-    .first { $0.alert.reminder.id == test.id && $0.alert.index == 0 }?.successor == nil,
-    "A failed/unaccepted successor cannot cause the earlier alert to expire.")
-precondition(ExpirationCandidate.make(pending: expiryPending, reminders: [snoozed, later], now: start.addingTimeInterval(-30))
-    .allSatisfy { $0.alert.reminder.id != test.id }, "Do not rewrite stale generations after Snooze.")
-precondition(!ExpirationCandidate.make(pending: expiryPending, reminders: [test], now: start.addingTimeInterval(-4))
-    .contains { $0.alert.index == 0 }, "Do not repost a request that is about to fire.")
-let snoozeExpiry = ExpirationCandidate.make(pending: paused.alerts.compactMap { PendingNudge($0.identifier) },
-                                           reminders: [snoozed], now: start)
-precondition(snoozeExpiry.first?.alert.date == start.addingTimeInterval(900))
-precondition(snoozeExpiry.first?.successor?.date == start.addingTimeInterval(1020))
-var fiveMinute = test
-fiveMinute.preferences.nagMinutes = 5
-let fivePlan = AlertPlan(reminders: [fiveMinute], now: start.addingTimeInterval(-30), capacity: 3)
-let fiveExpiry = ExpirationCandidate.make(pending: fivePlan.alerts.compactMap { PendingNudge($0.identifier) },
-                                         reminders: [fiveMinute], now: start.addingTimeInterval(-30))
-precondition(fiveExpiry.map { $0.successor?.date } == [start.addingTimeInterval(300), start.addingTimeInterval(600), nil])
-print("Expiration successor, final-card, partial-queue, isolation, and Snooze checks passed.")
+func checkSoundOnlyRequests() {
+    let now = start.addingTimeInterval(-30)
+    for minutes in [2, 5, 10, 15, 20, 30] {
+        var reminder = test
+        reminder.preferences.nagMinutes = minutes
+        reminder.preferences.sound = .chime
+        reminder.notes = "Keep this card for Done or Snooze."
+        let staged = NagDelivery.prepare(ReminderSnapshot(reminders: [reminder]),
+                                         replacing: ReminderSnapshot(), now: now)
+        precondition(staged.reminders[0].soundOnlyAnchorAccepted == false)
+        let firstCandidate = AlertPlan(reminders: staged.reminders, now: now, capacity: 1).alerts[0]
+        let accepted = NagDelivery.acceptingVisibleAnchor(identifier: firstCandidate.identifier, in: staged)!
+        reminder = accepted.reminders[0]
+        precondition(reminder.soundOnlyAfterIndex == 0)
+        precondition(reminder.soundOnlyAnchorAccepted == true)
+        let plan = AlertPlan(reminders: [reminder], now: now, capacity: 3)
+        let requests = plan.alerts.map { NotificationRequestFactory.make(for: $0, soundOnlyEnabled: true, now: now) }
+        let first = requests[0].content
+        precondition(first.title == reminder.title && first.body == reminder.notes)
+        precondition(first.categoryIdentifier == NotificationRequestFactory.category)
+        precondition(first.threadIdentifier == reminder.id.uuidString && first.sound != nil)
+        precondition(!NotificationRequestFactory.isSoundOnly(first), "The first alert must keep Done and Snooze accessible.")
+        for index in 1..<requests.count {
+            let request = requests[index]
+            let content = request.content
+            precondition(content.title.isEmpty && content.body.isEmpty && content.subtitle.isEmpty)
+            precondition(content.categoryIdentifier.isEmpty && content.threadIdentifier.isEmpty)
+            precondition(content.attachments.isEmpty && content.badge == nil && content.sound != nil)
+            precondition(NotificationRequestFactory.isSoundOnly(content))
+            precondition(content.userInfo["id"] as? String == reminder.id.uuidString)
+            precondition(content.userInfo["generation"] as? String == reminder.generation.uuidString)
+            precondition(content.userInfo[NagDelivery.titleKey] as? String == reminder.title)
+            let expectedDate = start.addingTimeInterval(Double(index * minutes * 60))
+            precondition(content.userInfo[NagDelivery.scheduledKey] as? Double == expectedDate.timeIntervalSince1970)
+            precondition((request.trigger as? UNTimeIntervalNotificationTrigger)?.timeInterval == expectedDate.timeIntervalSince(now))
+            precondition(content.userInfo["nudgeExpiryRequestedAt"] == nil, "The failed expiration experiment must not affect these requests.")
+        }
+        let fullRequests = plan.alerts.map { NotificationRequestFactory.make(for: $0, soundOnlyEnabled: false, now: now) }
+        precondition(fullRequests.allSatisfy {
+            $0.content.title == reminder.title && $0.content.categoryIdentifier == NotificationRequestFactory.category
+                && !NotificationRequestFactory.isSoundOnly($0.content)
+        }, "Turning the experiment off restores full alerts at every interval.")
+        precondition(!NotificationRequestFactory.needsRewrite(requests[1], for: plan.alerts[1], enabled: true))
+        precondition(NotificationRequestFactory.needsRewrite(requests[1], for: plan.alerts[1], enabled: false))
+        precondition(NotificationRequestFactory.needsRewrite(fullRequests[1], for: plan.alerts[1], enabled: true))
+
+        reminder.preferences.sound = .silent
+        let silentPlan = AlertPlan(reminders: [reminder], now: now, capacity: 3)
+        let silentRequests = silentPlan.alerts.map { NotificationRequestFactory.make(for: $0, soundOnlyEnabled: true, now: now) }
+        precondition(silentRequests.allSatisfy {
+            !$0.content.title.isEmpty && $0.content.sound == nil && !NotificationRequestFactory.isSoundOnly($0.content)
+        }, "A Silent selection must retain visible nags, not produce empty silent reminders.")
+    }
+
+    let legacyPlan = AlertPlan(reminders: [test], now: now, capacity: 3)
+    precondition(test.soundOnlyAfterIndex == nil)
+    precondition(legacyPlan.alerts.allSatisfy {
+        let request = NotificationRequestFactory.make(for: $0, soundOnlyEnabled: true, now: now)
+        return request.content.title == test.title && !NotificationRequestFactory.isSoundOnly(request.content)
+    }, "An existing generation cannot become sound-only without a new visible anchor.")
+    let oldContent = UNMutableNotificationContent()
+    oldContent.title = test.title
+    oldContent.userInfo = ["id": test.id.uuidString, "generation": test.generation.uuidString,
+                           "nudgeExpiryRequestedAt": start.addingTimeInterval(120).timeIntervalSince1970]
+    let oldRequest = UNNotificationRequest(identifier: legacyPlan.alerts[0].identifier, content: oldContent,
+                                           trigger: UNTimeIntervalNotificationTrigger(timeInterval: 30, repeats: false))
+    precondition(NotificationRequestFactory.needsRewrite(oldRequest, for: legacyPlan.alerts[0], enabled: true))
+    let replacement = NotificationRequestFactory.make(for: legacyPlan.alerts[0], soundOnlyEnabled: true, now: now)
+    precondition(!NotificationRequestFactory.needsRewrite(replacement, for: legacyPlan.alerts[0], enabled: true))
+    precondition(replacement.content.userInfo["nudgeExpiryRequestedAt"] == nil)
+    print("Sound-only request content, intervals, Silent fallback, and mode rewrite checks passed.")
+}
+
+func checkSoundOnlyAnchorsAndIsolation() {
+    let beforeDue = start.addingTimeInterval(-30)
+    let prepared = NagDelivery.prepare(ReminderSnapshot(reminders: [test, later]),
+                                       replacing: ReminderSnapshot(), now: beforeDue)
+    let anchored = prepared.reminders.first { $0.id == test.id }!
+    precondition(anchored.soundOnlyAfterIndex == 0 && anchored.soundOnlyAnchorAccepted == false)
+    let firstCandidate = AlertPlan(reminders: [anchored], now: beforeDue, capacity: 1).alerts[0]
+    let accepted = NagDelivery.acceptingVisibleAnchor(identifier: firstCandidate.identifier, in: prepared)!
+    let refreshed = NagDelivery.prepare(accepted, replacing: accepted, now: start.addingTimeInterval(125))
+    precondition(refreshed == accepted && refreshed.reminders.first { $0.id == test.id }?.soundOnlyAnchorAccepted == true,
+                 "Reopening must preserve the accepted visible anchor.")
+    precondition(NagDelivery.acceptingVisibleAnchor(identifier: firstCandidate.identifier, in: accepted) == nil,
+                 "Accepting the same visible anchor twice must not rewrite the database.")
+
+    // A permission prompt or interrupted launch can outlast the originally planned first alert.
+    let delayedPlan = AlertPlan(reminders: [anchored], now: start.addingTimeInterval(125), capacity: 2)
+    precondition(delayedPlan.alerts[0].index == 2)
+    precondition(delayedPlan.alerts.allSatisfy { !NagDelivery.isSoundOnly($0, enabled: true) },
+                 "Before any visible request is accepted, future requests must stay visible.")
+    let delayedFirst = NotificationRequestFactory.make(for: delayedPlan.alerts[0], soundOnlyEnabled: true,
+                                                       now: start.addingTimeInterval(125))
+    precondition(delayedFirst.content.title == test.title && delayedFirst.content.categoryIdentifier == NotificationRequestFactory.category)
+    let delayedAccepted = NagDelivery.acceptingVisibleAnchor(identifier: delayedFirst.identifier, in: prepared)!
+    let delayedReminder = delayedAccepted.reminders.first { $0.id == test.id }!
+    precondition(delayedReminder.soundOnlyAfterIndex == 2 && delayedReminder.soundOnlyAnchorAccepted == true)
+    let delayedPending = delayedPlan.alerts.compactMap { PendingNudge($0.identifier) }
+    precondition(PendingNudge.expendable(in: delayedPending, current: [test.id: delayedReminder], desired: [])?.index == 3,
+                 "Capacity pruning must preserve a visible anchor with a nonzero index.")
+    precondition(PendingNudge.expendable(in: delayedPending, current: [test.id: delayedReminder],
+                                       desired: [delayedPending[1].identifier]) == nil,
+                 "A delayed visible anchor cannot be treated as an expendable nag.")
+    let acceptedPlan = AlertPlan(reminders: [delayedReminder], now: start.addingTimeInterval(125), capacity: 2)
+    precondition(!NagDelivery.isSoundOnly(acceptedPlan.alerts[0], enabled: true)
+                 && NagDelivery.isSoundOnly(acceptedPlan.alerts[1], enabled: true),
+                 "The actual accepted request becomes the anchor; only its successors can be audio-only.")
+    precondition(delayedAccepted.reminders.first { $0.id == later.id } == prepared.reminders.first { $0.id == later.id })
+    precondition(NagDelivery.acceptingVisibleAnchor(identifier: "not-a-nudge", in: prepared) == nil)
+    precondition(NagDelivery.acceptingVisibleAnchor(identifier: oldPrimary.identifier,
+                                                    in: ReminderSnapshot(reminders: [test])) == nil,
+                 "An older generation that never opted in must not be converted by accepting a request.")
+
+    var edited = test
+    edited.generation = UUID()
+    let overdue = NagDelivery.prepare(ReminderSnapshot(reminders: [edited, later]),
+                                      replacing: ReminderSnapshot(reminders: [test, later]),
+                                      now: start.addingTimeInterval(125))
+    let overdueReminder = overdue.reminders.first { $0.id == test.id }!
+    precondition(overdueReminder.soundOnlyAfterIndex == 2 && overdueReminder.soundOnlyAnchorAccepted == false)
+    let overduePlan = AlertPlan(reminders: [overdueReminder], now: start.addingTimeInterval(125), capacity: 2)
+    precondition(overduePlan.alerts.map(\.date) == [start.addingTimeInterval(240), start.addingTimeInterval(360)])
+    let overdueAccepted = NagDelivery.acceptingVisibleAnchor(identifier: overduePlan.alerts[0].identifier, in: overdue)!
+    let readyOverdue = overdueAccepted.reminders.first { $0.id == test.id }!
+    let readyOverduePlan = AlertPlan(reminders: [readyOverdue], now: start.addingTimeInterval(125), capacity: 2)
+    precondition(!NagDelivery.isSoundOnly(readyOverduePlan.alerts[0], enabled: true)
+                 && NagDelivery.isSoundOnly(readyOverduePlan.alerts[1], enabled: true),
+                 "Saving an overdue reminder must leave one future actionable card before audio nags.")
+    precondition(overdue.reminders.first { $0.id == later.id } == later,
+                 "An unrelated save must not opt legacy reminders into sound-only delivery.")
+
+    let snoozeSnapshot = NagDelivery.prepare(ReminderSnapshot(reminders: [snoozed, later]),
+                                             replacing: ReminderSnapshot(reminders: [test, later]), now: start)
+    let resumed = snoozeSnapshot.reminders.first { $0.id == test.id }!
+    precondition(resumed.soundOnlyAfterIndex == 0 && resumed.soundOnlyAnchorAccepted == false)
+    let snoozePlan = AlertPlan(reminders: [resumed], now: start, capacity: 2)
+    precondition(snoozePlan.alerts.map(\.date) == [start.addingTimeInterval(900), start.addingTimeInterval(1020)])
+    let acceptedSnooze = NagDelivery.acceptingVisibleAnchor(identifier: snoozePlan.alerts[0].identifier, in: snoozeSnapshot)!
+    let acceptedSnoozePlan = AlertPlan(reminders: [acceptedSnooze.reminders.first { $0.id == test.id }!], now: start, capacity: 2)
+    precondition(!NagDelivery.isSoundOnly(acceptedSnoozePlan.alerts[0], enabled: true)
+                 && NagDelivery.isSoundOnly(acceptedSnoozePlan.alerts[1], enabled: true))
+    precondition(NagDelivery.acceptingVisibleAnchor(identifier: oldPrimary.identifier, in: snoozeSnapshot) == nil,
+                 "A stale-generation success callback must not authorize sound-only nags after Snooze.")
+    let stopped = NagDelivery.prepare(ReminderSnapshot(reminders: [completed]), replacing: ReminderSnapshot(), now: start)
+    precondition(stopped.reminders[0].soundOnlyAfterIndex == nil)
+    precondition(AlertPlan(reminders: stopped.reminders, now: start).alerts.isEmpty)
+
+    let pending = initial.alerts.compactMap { PendingNudge($0.identifier) }
+    let currentOnly = NagDelivery.rewritableAlerts(pending: pending, reminders: [resumed, later], now: beforeDue)
+    precondition(currentOnly.allSatisfy { $0.reminder.id == later.id }, "Never rewrite stale generations after Snooze.")
+    let nearDue = NagDelivery.rewritableAlerts(pending: pending, reminders: [test, later], now: start.addingTimeInterval(-4))
+    precondition(!nearDue.contains { $0.reminder.id == test.id && $0.index == 0 })
+    precondition(nearDue.contains { $0.reminder.id == later.id }, "Skipping an imminent request must not affect other reminders.")
+    let rewritten = nearDue.first { $0.reminder.id == test.id && $0.index == 1 }!
+    let afterReopen = start.addingTimeInterval(30)
+    let rewrittenRequest = NotificationRequestFactory.make(for: rewritten, soundOnlyEnabled: true, now: afterReopen)
+    precondition(rewritten.date == start.addingTimeInterval(120))
+    precondition((rewrittenRequest.trigger as? UNTimeIntervalNotificationTrigger)?.timeInterval == 90,
+                 "Rewriting must preserve the absolute due time, not restart the original delay.")
+    var notificationsOff = test
+    notificationsOff.preferences.notifications = false
+    precondition(NagDelivery.rewritableAlerts(pending: pending, reminders: [notificationsOff], now: beforeDue).isEmpty)
+    precondition(NagDelivery.rewritableAlerts(pending: pending, reminders: [completed], now: beforeDue).isEmpty)
+    print("Visible anchor, overdue save, Snooze, generation isolation, and original-time checks passed.")
+}
+
+func checkSoundOnlyCleanup() {
+    let now = start.addingTimeInterval(-30)
+    let prepared = NagDelivery.prepare(ReminderSnapshot(reminders: [test]), replacing: ReminderSnapshot(), now: now)
+    let firstCandidate = AlertPlan(reminders: prepared.reminders, now: now, capacity: 1).alerts[0]
+    let accepted = NagDelivery.acceptingVisibleAnchor(identifier: firstCandidate.identifier, in: prepared)!
+    let plan = AlertPlan(reminders: accepted.reminders, now: now, capacity: 3)
+    let requests = plan.alerts.map { NotificationRequestFactory.make(for: $0, soundOnlyEnabled: true, now: now) }
+    let otherAlert = ScheduledAlert(reminder: later, index: 0, date: later.due)
+    let otherRequest = NotificationRequestFactory.make(for: otherAlert, soundOnlyEnabled: true, now: now)
+    let entries = zip(plan.alerts, requests).compactMap { alert, request in
+        NotificationRequestFactory.visibleNudge(identifier: request.identifier, content: request.content, date: alert.date)
+    } + [NotificationRequestFactory.visibleNudge(identifier: otherRequest.identifier, content: otherRequest.content,
+                                                 date: otherAlert.date)!]
+    precondition(entries.count == 2)
+    precondition(DeliveredNudge.supersededIdentifiers(in: entries).isEmpty,
+                 "Audio-only records must not retire the original card during reopen cleanup.")
+    precondition(NotificationRequestFactory.visibleNudge(identifier: requests[2].identifier, content: requests[2].content,
+                                                          date: plan.alerts[2].date) == nil,
+                 "Foreground audio-only arrivals must not trigger visible-card cleanup.")
+    let fullNag = NotificationRequestFactory.make(for: plan.alerts[2], soundOnlyEnabled: false, now: now)
+    let visibleIncoming = NotificationRequestFactory.visibleNudge(identifier: fullNag.identifier, content: fullNag.content,
+                                                                  date: plan.alerts[2].date)!
+    precondition(DeliveredNudge.supersededIdentifiers(in: entries, by: visibleIncoming) == [requests[0].identifier])
+    let blankLegacyContent = UNMutableNotificationContent()
+    precondition(NotificationRequestFactory.visibleNudge(identifier: requests[0].identifier, content: blankLegacyContent,
+                                                          date: start) == nil)
+    print("Sound-only cleanup isolation checks passed.")
+}
+
+func checkSoundOnlyDatabaseCompatibility() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let suite = "nudge-sound-checks.\(UUID().uuidString)"
+    let preferences = UserDefaults(suiteName: suite)!
+    defer {
+        preferences.removePersistentDomain(forName: suite)
+        try? FileManager.default.removeItem(at: root)
+    }
+    // Build an old-schema fixture by explicitly stripping the new optional fields.
+    let original = ReminderSnapshot(reminders: [test, later], deletedIDs: [UUID()])
+    var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as! [String: Any]
+    var records = json["reminders"] as! [[String: Any]]
+    for index in records.indices {
+        records[index].removeValue(forKey: "soundOnlyAfterIndex")
+        records[index].removeValue(forKey: "soundOnlyAnchorAccepted")
+    }
+    json["reminders"] = records
+    let legacyBytes = try JSONSerialization.data(withJSONObject: json, options: [.sortedKeys])
+    let decoded = try JSONDecoder().decode(ReminderSnapshot.self, from: legacyBytes)
+    precondition(decoded == original && decoded.reminders.allSatisfy {
+        $0.soundOnlyAfterIndex == nil && $0.soundOnlyAnchorAccepted == nil
+    })
+    let database = ReminderDatabase(url: root.appendingPathComponent("Reminders.json"), preferences: preferences)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    try legacyBytes.write(to: database.url, options: .atomic)
+    let source = try database.read()
+    precondition(source == .file(original))
+    let afterRead = try Data(contentsOf: database.url)
+    precondition(afterRead == legacyBytes, "Reading an old database must leave its bytes intact.")
+    var edited = decoded
+    edited.reminders[0].generation = UUID()
+    edited.reminders[0].title = "Edited reminder"
+    let prepared = NagDelivery.prepare(edited, replacing: decoded, now: start.addingTimeInterval(-30))
+    precondition(prepared.reminders[0].soundOnlyAfterIndex == 0 && prepared.reminders[0].soundOnlyAnchorAccepted == false)
+    precondition(prepared.reminders[1] == later && prepared.deletedIDs == original.deletedIDs)
+    let committed = try database.commit(prepared, replacing: source)
+    precondition(committed == .file(prepared))
+    let readback = try database.read()
+    precondition(readback == .file(prepared), "Persisting the anchor must preserve other reminders and deletion history.")
+    let anchor = AlertPlan(reminders: [prepared.reminders[0]], now: start.addingTimeInterval(-30), capacity: 1).alerts[0]
+    let accepted = NagDelivery.acceptingVisibleAnchor(identifier: anchor.identifier, in: prepared)!
+    let acceptedSource = try database.commit(accepted, replacing: readback)
+    precondition(acceptedSource == .file(accepted) && accepted.reminders[0].soundOnlyAnchorAccepted == true)
+    precondition(accepted.reminders[1] == later && accepted.deletedIDs == original.deletedIDs)
+    print("Optional-anchor database compatibility and preservation checks passed.")
+}
+
+checkSoundOnlyRequests()
+checkSoundOnlyAnchorsAndIsolation()
+checkSoundOnlyCleanup()
+try checkSoundOnlyDatabaseCompatibility()
