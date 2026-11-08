@@ -81,15 +81,28 @@ final class ReminderStore: ObservableObject {
         reminders[index].generation = UUID()
         reminders[index].snoozedUntil = nil
         if let next = reminders[index].nextOccurrence(after: now) {
+            var occurrence = reminders[index]
+            occurrence.id = UUID()
+            occurrence.completedAt = now
             reminders[index].due = next
             reminders[index].phoneSchedule?.day = Calendar.autoupdatingCurrent.dateComponents(
                 [.era, .year, .month, .day], from: next
             )
+            reminders.append(occurrence)
         } else {
             reminders[index].completedAt = now
         }
         saveReminders()
         enqueueSync()
+    }
+
+    func restore(_ reminder: Reminder) {
+        guard var saved = reminders.first(where: { $0.id == reminder.id && $0.completedAt != nil }) else { return }
+        saved.completedAt = nil
+        saved.snoozedUntil = nil
+        // A completed occurrence is separate from the active recurring series.
+        saved.preferences.repeatRule = .never
+        save(saved)
     }
 
     func snooze(_ reminder: Reminder, now: Date = .now) {
@@ -129,10 +142,6 @@ final class ReminderStore: ObservableObject {
             saveReminders()
         }
         enqueueSync()
-    }
-
-    func enableNotifications() {
-        enqueueSync(askPermission: true)
     }
 
     private func currentIndex(_ id: UUID, generation: UUID) -> Int? {
