@@ -78,6 +78,14 @@ struct Reminder: Codable, Identifiable, Equatable {
 
     var alertDate: Date { snoozedUntil ?? due }
 
+    var hasValidSchedule: Bool {
+        let dates = [due, repeatAnchor, snoozedUntil, completedAt].compactMap { $0 }
+        return dates.allSatisfy { abs($0.timeIntervalSinceReferenceDate) < 100_000_000_000 }
+            && ReminderPreferences.nagIntervals.contains(preferences.nagMinutes)
+            && preferences.weekdays.allSatisfy { (1...7).contains($0) }
+            && (phoneSchedule.map { (0...23).contains($0.hour) && (0...59).contains($0.minute) } ?? true)
+    }
+
     func nextOccurrence(after now: Date, calendar: Calendar = .autoupdatingCurrent) -> Date? {
         let rule = preferences.repeatRule
         guard rule != .never else { return nil }
@@ -134,6 +142,43 @@ struct ScheduledAlert: Equatable {
     }
 }
 
+// Cancellation requires positive evidence: an explicit stop, or an accepted
+// replacement for this reminder. An absent record alone is never evidence.
+struct PendingNudge {
+    let identifier: String
+    let id: UUID
+    let generation: UUID
+    let index: Int
+
+    init?(_ identifier: String) {
+        let parts = identifier.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 4, parts[0] == "nudge",
+              let id = UUID(uuidString: String(parts[1])),
+              let generation = UUID(uuidString: String(parts[2])),
+              let index = Int(parts[3]), index >= 0 else { return nil }
+        self.identifier = identifier
+        self.id = id
+        self.generation = generation
+        self.index = index
+    }
+
+    func canRetire(current: [UUID: Reminder], deletedIDs: Set<UUID>, queuedReplacement: Set<UUID>) -> Bool {
+        if deletedIDs.contains(id) { return true }
+        guard let reminder = current[id] else { return false }
+        return reminder.completedAt != nil || !reminder.preferences.notifications
+            || (generation != reminder.generation && queuedReplacement.contains(id))
+    }
+
+    static func expendable(in pending: [Self], current: [UUID: Reminder], desired: Set<String>) -> Self? {
+        // Never evict a primary or the last pending alert for any reminder.
+        let counts = Dictionary(grouping: pending, by: \.id).mapValues(\.count)
+        return pending.filter {
+            current[$0.id] != nil && !desired.contains($0.identifier)
+                && $0.index > 0 && (counts[$0.id] ?? 0) > 1
+        }.max { $0.index < $1.index }
+    }
+}
+
 struct AlertPlan {
     // Reserve a margin under the historically documented 64-request capacity.
     static let capacity = 60
@@ -142,12 +187,14 @@ struct AlertPlan {
 
     init(reminders: [Reminder], now: Date, capacity: Int = AlertPlan.capacity) {
         let first = reminders.compactMap { reminder -> ScheduledAlert? in
-            guard reminder.completedAt == nil, reminder.preferences.notifications else { return nil }
+            guard reminder.hasValidSchedule, reminder.completedAt == nil, reminder.preferences.notifications else { return nil }
             let start = reminder.alertDate
             let interval = TimeInterval(reminder.preferences.nagMinutes * 60)
             if start > now { return ScheduledAlert(reminder: reminder, index: 0, date: start) }
             guard interval > 0 else { return nil }
-            let index = Int(now.timeIntervalSince(start) / interval) + 1
+            guard let elapsed = Int(exactly: (now.timeIntervalSince(start) / interval).rounded(.down)),
+                  elapsed < Int.max - AlertPlan.capacity else { return nil }
+            let index = elapsed + 1
             return ScheduledAlert(reminder: reminder, index: index, date: start.addingTimeInterval(Double(index) * interval))
         }.sorted { $0.date == $1.date ? $0.identifier < $1.identifier : $0.date < $1.date }
 

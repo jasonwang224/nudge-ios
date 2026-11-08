@@ -18,14 +18,15 @@ struct ReminderEditor: View {
     init(store: ReminderStore, reminder: Reminder?) {
         self.store = store
         original = reminder
-        let date = reminder?.due ?? Date().addingTimeInterval(5 * 60)
+        let date = reminder?.due ?? .now
         let components = Calendar.autoupdatingCurrent.dateComponents([.hour, .minute], from: date)
         let hour = reminder?.phoneSchedule?.hour ?? components.hour ?? 9
         let minute = reminder?.phoneSchedule?.minute ?? components.minute ?? 0
         _title = State(initialValue: reminder?.title ?? "")
         _notes = State(initialValue: reminder?.notes ?? "")
         _day = State(initialValue: date)
-        _time = State(initialValue: String(format: "%d:%02d", hour % 12 == 0 ? 12 : hour % 12, minute))
+        _time = State(initialValue: reminder == nil
+                      ? "" : String(format: "%d:%02d", hour % 12 == 0 ? 12 : hour % 12, minute))
         _isPM = State(initialValue: hour >= 12)
         _preferences = State(initialValue: reminder?.preferences ?? store.defaults)
     }
@@ -86,7 +87,7 @@ struct ReminderEditor: View {
             Label("WHEN", systemImage: "clock").font(.caption.weight(.semibold)).tracking(1)
                 .foregroundStyle(palette.secondary)
             HStack(spacing: 12) {
-                TextField("8:30", text: $time).keyboardType(.numbersAndPunctuation)
+                TextField("Time", text: $time).keyboardType(.numbersAndPunctuation)
                     .font(.largeTitle.weight(.medium).monospacedDigit())
                     .accessibilityLabel("Reminder time")
                 Picker("AM or PM", selection: $isPM) {
@@ -169,6 +170,10 @@ struct ReminderEditor: View {
     private func save() {
         let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { error = "Enter a reminder title."; return }
+        guard !time.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            error = "Enter a reminder time."
+            return
+        }
         guard var schedule = parsedSchedule, let date = schedule.dueDate() else {
             error = "Enter a valid time, such as 8:30 or 830."
             return
@@ -191,7 +196,10 @@ struct ReminderEditor: View {
         reminder.due = sameTestMinute ? (original?.due ?? date) : date
         reminder.phoneSchedule = sameTestMinute ? nil : schedule
         reminder.preferences = preferences
-        store.save(reminder)
+        if let message = store.save(reminder, replacing: original?.generation) {
+            error = message
+            return
+        }
         dismiss()
     }
 }

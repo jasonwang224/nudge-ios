@@ -2,7 +2,9 @@
 
 Native SwiftUI reminder app for the iPhone 11 Pro on iOS 17.4.1. The deployment target is iOS 17.4.
 
-On a Mac with Xcode, run `bash scripts/build-ipa.sh`. GitHub Actions runs the same script on macOS. Download the **Nudge-1.0.0-Unsigned** artifact and extract the IPA. Use a sideloading tool to sign it with a provisioning profile for your iPhone. If updating the test build, use the same signing account and app identifier to keep your reminders.
+On a Mac with Xcode, run `bash scripts/build-ipa.sh`. GitHub Actions runs the same script on macOS. Download the **Nudge-1.0.1-Unsigned** artifact and extract the IPA. Use a sideloading tool to sign it with a provisioning profile for your iPhone. Install over the existing app with the same signing account and app identifier to keep your reminders.
+
+Version 1.0.1 moves reminders into a file that is replaced atomically when changes are saved. An unreadable database pauses changes and leaves pending alerts alone. As an upgrade check, create two reminders in the previous build, then install the update over it. Confirm both are still visible and that completing one from the Lock Screen leaves the other scheduled.
 
 ## Lock Screen test
 

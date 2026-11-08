@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 import UserNotifications
 
 @MainActor
@@ -9,52 +10,62 @@ final class ReminderStore: ObservableObject {
     static let doneAction = "NUDGE_DONE"
     static let snoozeAction = "NUDGE_SNOOZE"
 
-    @Published private(set) var reminders: [Reminder]
+    @Published private(set) var reminders: [Reminder] = []
     @Published var defaults: ReminderPreferences {
         didSet { persist(defaults, key: Self.defaultsKey) }
     }
     @Published private(set) var status = "Checking notification access…"
     @Published private(set) var needsSettings = false
     @Published private(set) var isScheduling = false
+    @Published private(set) var storageIssue: String?
 
-    private static let remindersKey = "Nudge.reminders.v1"
+    static let storageUnavailable = "Nudge couldn’t open your saved reminders. Your data and queued alerts were left untouched."
     private static let defaultsKey = "Nudge.defaults.v1"
     private let center = UNUserNotificationCenter.current()
+    private let database: ReminderDatabase
+    private var source: ReminderDatabase.Source?
+    private var snapshot = ReminderSnapshot()
+    private var verifiedEmpty = false
     private var syncTask: Task<Void, Never>?
     private var syncRevision = 0
+    private var permissionRequestedByUser = false
 
     private init() {
         let disk = UserDefaults.standard
-        let decoder = JSONDecoder()
-        reminders = disk.data(forKey: Self.remindersKey)
-            .flatMap { try? decoder.decode([Reminder].self, from: $0) } ?? []
+        database = ReminderDatabase(url: URL.applicationSupportDirectory.appending(path: "Nudge/Reminders-v1.json"),
+                                    preferences: disk)
         defaults = disk.data(forKey: Self.defaultsKey)
-            .flatMap { try? decoder.decode(ReminderPreferences.self, from: $0) } ?? ReminderPreferences()
+            .flatMap { try? JSONDecoder().decode(ReminderPreferences.self, from: $0) }
+            .flatMap { ReminderPreferences.nagIntervals.contains($0.nagMinutes) ? $0 : nil } ?? ReminderPreferences()
+        _ = loadDatabase()
     }
 
-    func save(_ reminder: Reminder) {
+    @discardableResult
+    func save(_ reminder: Reminder, replacing generation: UUID? = nil) -> String? {
         var saved = reminder
         saved.generation = UUID()
+        var changed = snapshot
+        var retired: Reminder?
         if let index = reminders.firstIndex(where: { $0.id == saved.id }) {
             let previous = reminders[index]
+            guard previous.generation == generation else { return "This reminder changed. Reopen it to edit the latest version." }
             if previous.due != saved.due || previous.phoneSchedule != saved.phoneSchedule {
                 saved.repeatAnchor = saved.due
                 saved.snoozedUntil = nil
             }
-            clearNotifications(for: previous)
-            reminders[index] = saved
+            retired = previous
+            changed.reminders[index] = saved
         } else {
-            reminders.append(saved)
+            guard generation == nil, !changed.deletedIDs.contains(saved.id) else { return "This reminder was deleted." }
+            changed.reminders.append(saved)
         }
-        saveReminders()
-        enqueueSync(askPermission: saved.preferences.notifications)
+        return commit(changed, retiring: retired, askPermission: saved.preferences.notifications)
     }
 
     func scheduleTest() {
         enqueueSync(askPermission: true)
-        let permissionCheck = syncTask
         Task {
-            await permissionCheck?.value
+            await waitForCurrentSync()
             let settings = await center.notificationSettings()
             guard settings.authorizationStatus == .authorized, settings.lockScreenSetting == .enabled else { return }
             let due = Date().addingTimeInterval(30)
@@ -68,80 +79,138 @@ final class ReminderStore: ObservableObject {
     }
 
     func delete(_ reminder: Reminder) {
-        guard let stored = reminders.first(where: { $0.id == reminder.id }) else { return }
-        clearNotifications(for: stored)
-        reminders.removeAll { $0.id == reminder.id }
-        saveReminders()
-        enqueueSync()
+        guard let index = reminders.firstIndex(where: {
+            $0.id == reminder.id && $0.generation == reminder.generation
+        }) else { return }
+        var changed = snapshot
+        let stored = changed.reminders.remove(at: index)
+        changed.deletedIDs.insert(stored.id)
+        commit(changed, retiring: stored)
     }
 
     func done(_ reminder: Reminder, now: Date = .now) {
         guard let index = currentIndex(reminder.id, generation: reminder.generation) else { return }
-        clearNotifications(for: reminders[index])
-        reminders[index].generation = UUID()
-        reminders[index].snoozedUntil = nil
-        if let next = reminders[index].nextOccurrence(after: now) {
-            var occurrence = reminders[index]
+        let previous = reminders[index]
+        var changed = snapshot
+        changed.reminders[index].generation = UUID()
+        changed.reminders[index].snoozedUntil = nil
+        if let next = previous.nextOccurrence(after: now) {
+            var occurrence = changed.reminders[index]
             occurrence.id = UUID()
             occurrence.completedAt = now
-            reminders[index].due = next
-            reminders[index].phoneSchedule?.day = Calendar.autoupdatingCurrent.dateComponents(
+            changed.reminders[index].due = next
+            changed.reminders[index].phoneSchedule?.day = Calendar.autoupdatingCurrent.dateComponents(
                 [.era, .year, .month, .day], from: next
             )
-            reminders.append(occurrence)
+            changed.reminders.append(occurrence)
         } else {
-            reminders[index].completedAt = now
+            changed.reminders[index].completedAt = now
         }
-        saveReminders()
-        enqueueSync()
+        commit(changed, retiring: previous)
     }
 
     func restore(_ reminder: Reminder) {
-        guard var saved = reminders.first(where: { $0.id == reminder.id && $0.completedAt != nil }) else { return }
+        guard var saved = reminders.first(where: {
+            $0.id == reminder.id && $0.generation == reminder.generation && $0.completedAt != nil
+        }) else { return }
         saved.completedAt = nil
         saved.snoozedUntil = nil
         // A completed occurrence is separate from the active recurring series.
         saved.preferences.repeatRule = .never
-        save(saved)
+        save(saved, replacing: saved.generation)
     }
 
     func snooze(_ reminder: Reminder, now: Date = .now) {
         guard let index = currentIndex(reminder.id, generation: reminder.generation) else { return }
-        clearNotifications(for: reminders[index])
-        reminders[index].generation = UUID()
-        reminders[index].snoozedUntil = now.addingTimeInterval(15 * 60)
-        saveReminders()
-        enqueueSync()
+        let previous = reminders[index]
+        var changed = snapshot
+        changed.reminders[index].generation = UUID()
+        changed.reminders[index].snoozedUntil = now.addingTimeInterval(15 * 60)
+        commit(changed, retiring: previous)
     }
 
     func handleAction(_ action: String, id: String, generation: String, at time: Date) async {
-        guard let id = UUID(uuidString: id), let generation = UUID(uuidString: generation),
+        guard loadDatabase(), let id = UUID(uuidString: id), let generation = UUID(uuidString: generation),
               let index = currentIndex(id, generation: generation) else { return }
         switch action {
         case Self.doneAction: done(reminders[index], now: time)
         case Self.snoozeAction: snooze(reminders[index], now: time)
         default: return
         }
-        await syncTask?.value
+        // Keep the delegate alive if an app refresh supersedes this reconciliation.
+        await waitForCurrentSync()
+    }
+
+    private func waitForCurrentSync() async {
+        while let task = syncTask {
+            let revision = syncRevision
+            await task.value
+            if revision == syncRevision { break }
+        }
     }
 
     func refresh() {
-        let calendar = Calendar.autoupdatingCurrent
-        var adjusted = reminders
-        for index in adjusted.indices where adjusted[index].completedAt == nil {
-            guard let due = adjusted[index].phoneSchedule?.dueDate(calendar: calendar),
-                  adjusted[index].due != due else { continue }
-            if adjusted[index].snoozedUntil == nil {
-                clearNotifications(for: adjusted[index])
-                adjusted[index].generation = UUID()
+        if loadDatabase() {
+            let calendar = Calendar.autoupdatingCurrent
+            var adjusted = snapshot
+            for index in adjusted.reminders.indices where adjusted.reminders[index].completedAt == nil {
+                guard let due = adjusted.reminders[index].phoneSchedule?.dueDate(calendar: calendar),
+                      adjusted.reminders[index].due != due else { continue }
+                if adjusted.reminders[index].snoozedUntil == nil {
+                    adjusted.reminders[index].generation = UUID()
+                }
+                adjusted.reminders[index].due = due
             }
-            adjusted[index].due = due
-        }
-        if adjusted != reminders {
-            reminders = adjusted
-            saveReminders()
+            if adjusted != snapshot {
+                commit(adjusted)
+                return
+            }
         }
         enqueueSync()
+    }
+
+    private func loadDatabase() -> Bool {
+        do {
+            let loaded = try database.read()
+            switch loaded {
+            case .missing:
+                if let source, source != .missing { throw ReminderDatabase.Problem.missing }
+                guard verifiedEmpty else { return false }
+            case .legacy(let existing), .file(let existing):
+                verifiedEmpty = false
+                if existing != snapshot {
+                    snapshot = existing
+                    reminders = existing.reminders
+                }
+            }
+            source = loaded
+            storageIssue = nil
+            return true
+        } catch {
+            source = nil
+            verifiedEmpty = false
+            storageIssue = Self.storageUnavailable
+            return false
+        }
+    }
+
+    @discardableResult
+    private func commit(_ changed: ReminderSnapshot, retiring previous: Reminder? = nil,
+                        askPermission: Bool = false) -> String? {
+        guard let source else { return storageIssue ?? "Open Nudge and wait for your reminders to finish loading." }
+        do {
+            self.source = try database.commit(changed, replacing: source)
+        } catch {
+            storageIssue = "Nudge couldn’t save this change. Your previous reminders and queued alerts were kept."
+            return storageIssue
+        }
+        snapshot = changed
+        reminders = changed.reminders
+        verifiedEmpty = false
+        storageIssue = nil
+        if let previous { clearNotifications(for: previous) }
+        enqueueSync(askPermission: askPermission)
+        return nil
     }
 
     private func currentIndex(_ id: UUID, generation: UUID) -> Int? {
@@ -157,10 +226,6 @@ final class ReminderStore: ObservableObject {
         }
     }
 
-    private func saveReminders() {
-        persist(reminders, key: Self.remindersKey)
-    }
-
     private func persist<T: Encodable>(_ value: T, key: String) {
         do {
             UserDefaults.standard.set(try JSONEncoder().encode(value), forKey: key)
@@ -170,6 +235,7 @@ final class ReminderStore: ObservableObject {
     }
 
     private func enqueueSync(askPermission: Bool = false) {
+        permissionRequestedByUser = permissionRequestedByUser || askPermission
         let prior = syncTask
         syncRevision += 1
         let revision = syncRevision
@@ -177,13 +243,31 @@ final class ReminderStore: ObservableObject {
         syncTask = Task { [weak self] in
             await prior?.value
             guard let self else { return }
-            await self.reconcile(askPermission: askPermission, revision: revision)
+            await self.reconcile(revision: revision)
             if revision == self.syncRevision { self.isScheduling = false }
         }
     }
 
-    private func reconcile(askPermission: Bool, revision: Int) async {
+    private func reconcile(revision: Int) async {
         var settings = await center.notificationSettings()
+        guard revision == syncRevision else { return }
+        let requests = await center.pendingNotificationRequests()
+        guard revision == syncRevision else { return }
+        if !loadDatabase() {
+            guard storageIssue == nil, UIApplication.shared.applicationState == .active,
+                  UIApplication.shared.isProtectedDataAvailable else { return }
+            let delivered = await center.deliveredNotifications()
+            guard revision == syncRevision else { return }
+            guard !(requests.map(\.identifier) + delivered.map(\.request.identifier))
+                .contains(where: { $0.hasPrefix(ScheduledAlert.prefix) }) else {
+                storageIssue = Self.storageUnavailable
+                return
+            }
+            verifiedEmpty = true
+            guard loadDatabase() else { return }
+        }
+        let askPermission = permissionRequestedByUser
+        permissionRequestedByUser = false
         if askPermission && settings.authorizationStatus == .notDetermined {
             do {
                 _ = try await center.requestAuthorization(options: [.alert, .sound])
@@ -199,37 +283,72 @@ final class ReminderStore: ObservableObject {
             || settings.authorizationStatus == .provisional || settings.authorizationStatus == .ephemeral
         let lockScreenEnabled = settings.lockScreenSetting == .enabled
         needsSettings = settings.authorizationStatus == .denied || (authorized && !lockScreenEnabled)
-        let pending = await center.pendingNotificationRequests()
-        guard revision == syncRevision else { return }
-        let owned = pending.map(\.identifier).filter { $0.hasPrefix(ScheduledAlert.prefix) }
         guard authorized else {
-            center.removePendingNotificationRequests(withIdentifiers: owned)
             status = "Allow notifications to receive reminders on the Lock Screen."
             return
         }
+        // Re-read after any permission prompt. Cancellation only uses readable, committed data.
+        guard loadDatabase() else { return }
 
         let plan = AlertPlan(reminders: reminders, now: .now)
         let desired = Set(plan.alerts.map(\.identifier))
-        center.removePendingNotificationRequests(withIdentifiers: owned.filter { !desired.contains($0) })
-        let retained = Set(owned).intersection(desired)
-        var failures = 0
-        for alert in plan.alerts where !retained.contains(alert.identifier) {
+        let current = Dictionary(uniqueKeysWithValues: reminders.map { ($0.id, $0) })
+        var pending = requests.compactMap { PendingNudge($0.identifier) }
+        let otherCount = requests.count - pending.count
+        var retained = Set(pending.map(\.identifier))
+        var replacements = Set(plan.alerts.lazy.filter { retained.contains($0.identifier) }.map(\.reminder.id))
+
+        func retireSuperseded() {
+            let removed = Set(pending.filter {
+                $0.canRetire(current: current, deletedIDs: snapshot.deletedIDs, queuedReplacement: replacements)
+            }.map(\.identifier))
+            guard !removed.isEmpty else { return }
+            center.removePendingNotificationRequests(withIdentifiers: Array(removed))
+            pending.removeAll { removed.contains($0.identifier) }
+            retained.subtract(removed)
+        }
+        retireSuperseded()
+
+        var failure = false
+        for alert in plan.alerts {
             guard revision == syncRevision else { return }
+            guard !retained.contains(alert.identifier) else { continue }
+            // A one-slot swap gives iOS the replacement before retiring the old
+            // generation. When adding a new reminder, only shed a redundant nag.
+            let count = pending.count + otherCount
+            let canSwap = count == AlertPlan.capacity && pending.contains {
+                $0.id == alert.reminder.id && $0.generation != alert.reminder.generation
+            }
+            if count >= AlertPlan.capacity && !canSwap {
+                guard let extra = PendingNudge.expendable(in: pending, current: current, desired: desired) else {
+                    failure = true
+                    break
+                }
+                center.removePendingNotificationRequests(withIdentifiers: [extra.identifier])
+                pending.removeAll { $0.identifier == extra.identifier }
+                retained.remove(extra.identifier)
+            }
             do {
                 try await center.add(request(for: alert))
             } catch {
-                failures += 1
+                failure = true
+                break
             }
+            guard revision == syncRevision, source != nil else { return }
+            if let added = PendingNudge(alert.identifier) { pending.append(added) }
+            retained.insert(alert.identifier)
+            replacements.insert(alert.reminder.id)
+            retireSuperseded()
         }
         guard revision == syncRevision else { return }
         if !lockScreenEnabled {
             status = "Turn on Lock Screen alerts for Nudge in iPhone Settings."
-        } else if failures > 0 || plan.unscheduledFirstAlerts > 0 {
+        } else if failure || plan.unscheduledFirstAlerts > 0 {
             status = "Some alerts could not be queued. Check your reminders before closing Nudge."
         } else if settings.scheduledDeliverySetting == .enabled {
             status = "Alerts are queued. Choose immediate delivery in iPhone Settings for on-time tests."
         } else {
-            status = "\(plan.alerts.count) alerts queued with iOS."
+            status = "\(retained.count) alerts queued with iOS."
         }
     }
 

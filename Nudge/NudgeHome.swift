@@ -27,6 +27,16 @@ struct NudgeHome: View {
         }
         .tint(palette.accent)
         .preferredColorScheme(appearance.scheme)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if let issue = store.storageIssue {
+                Label(issue, systemImage: "exclamationmark.triangle")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(palette.ink)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(palette.coral)
+            }
+        }
         .sheet(item: $editor) { item in
             ReminderEditor(store: store, reminder: item.reminder)
                 .tint(palette.accent)

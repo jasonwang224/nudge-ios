@@ -65,3 +65,86 @@ let afterSnooze = justBeforeSpring.addingTimeInterval(15 * 60)
 precondition(calendar.component(.hour, from: afterSnooze) == 3)
 precondition(calendar.component(.minute, from: afterSnooze) == 10)
 print("Reminder scheduling checks passed.")
+
+func expectFailure(_ label: String, _ operation: () throws -> Void) {
+    do {
+        try operation()
+        preconditionFailure("Expected failure: \(label)")
+    } catch { }
+}
+
+func checkDatabaseSafety() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let suite = "nudge-checks.\(UUID().uuidString)"
+    let preferences = UserDefaults(suiteName: suite)!
+    defer {
+        preferences.removePersistentDomain(forName: suite)
+        try? FileManager.default.removeItem(at: root)
+    }
+    let database = ReminderDatabase(url: root.appendingPathComponent("Reminders.json"), preferences: preferences)
+    let empty = try database.read()
+    precondition(empty == .missing)
+
+    preferences.set("incorrect type", forKey: ReminderDatabase.legacyKey)
+    expectFailure("a legacy value of the wrong type is not an empty store") { _ = try database.read() }
+    var invalid = test
+    invalid.preferences.nagMinutes = Int.max
+    preferences.set(try JSONEncoder().encode([test, invalid]), forKey: ReminderDatabase.legacyKey)
+    expectFailure("a bad record cannot erase a good one") { _ = try database.read() }
+    precondition(AlertPlan(reminders: [invalid], now: start).alerts.isEmpty)
+
+    let legacyBytes = try JSONEncoder().encode([test, later])
+    preferences.set(legacyBytes, forKey: ReminderDatabase.legacyKey)
+    let original = ReminderSnapshot(reminders: [test, later])
+    let loaded = try database.read()
+    precondition(loaded == .legacy(original))
+    let migrated = try database.commit(original, replacing: loaded)
+    precondition(migrated == .file(original))
+    precondition(preferences.data(forKey: ReminderDatabase.legacyKey) == legacyBytes)
+    let beforeSnooze = try Data(contentsOf: database.url)
+
+    try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: root.path)
+    expectFailure("failed atomic Snooze write") {
+        _ = try database.commit(ReminderSnapshot(reminders: [snoozed, later]), replacing: migrated)
+    }
+    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: root.path)
+    let afterFailedWrite = try Data(contentsOf: database.url)
+    precondition(afterFailedWrite == beforeSnooze)
+
+    let changed = ReminderSnapshot(reminders: [snoozed], deletedIDs: [later.id])
+    let saved = try database.commit(changed, replacing: migrated)
+    precondition(saved == .file(changed))
+    expectFailure("stale snapshot cannot undo Snooze or delete") {
+        _ = try database.commit(original, replacing: migrated)
+    }
+
+    let corrupt = Data("{\"version\":1,\"reminders\":[".utf8)
+    try corrupt.write(to: database.url, options: .atomic)
+    expectFailure("corrupted primary is not an empty store") { _ = try database.read() }
+    expectFailure("cannot overwrite corrupt bytes with a blank database") {
+        _ = try database.commit(ReminderSnapshot(), replacing: saved)
+    }
+    let afterAttemptedOverwrite = try Data(contentsOf: database.url)
+    precondition(afterAttemptedOverwrite == corrupt)
+    try FileManager.default.removeItem(at: database.url)
+    expectFailure("a missing primary cannot resurrect an obsolete legacy copy") { _ = try database.read() }
+}
+
+try checkDatabaseSafety()
+
+let oldPrimary = PendingNudge(initial.alerts.first { $0.reminder.id == test.id && $0.index == 0 }!.identifier)!
+let oldNag = PendingNudge(initial.alerts.first { $0.reminder.id == test.id && $0.index == 1 }!.identifier)!
+let otherPrimary = PendingNudge(initial.alerts.first { $0.reminder.id == later.id }!.identifier)!
+let current = [test.id: snoozed, later.id: later]
+precondition(!oldPrimary.canRetire(current: current, deletedIDs: [], queuedReplacement: []),
+             "An interrupted or rejected replacement must leave the original queued.")
+precondition(oldPrimary.canRetire(current: current, deletedIDs: [], queuedReplacement: [test.id]))
+precondition(!otherPrimary.canRetire(current: current, deletedIDs: [], queuedReplacement: [test.id]))
+precondition(!otherPrimary.canRetire(current: [:], deletedIDs: [], queuedReplacement: []),
+             "A missing record does not authorize cancellation.")
+precondition(otherPrimary.canRetire(current: [:], deletedIDs: [later.id], queuedReplacement: []))
+precondition(PendingNudge.expendable(in: [oldPrimary, oldNag, otherPrimary], current: current, desired: [])?
+    .identifier == oldNag.identifier)
+precondition(PendingNudge.expendable(in: [oldNag, otherPrimary], current: current, desired: []) == nil,
+             "Do not drop the last queued nag even when the new alert has no free slot.")
+print("Database and notification preservation checks passed.")
