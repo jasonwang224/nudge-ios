@@ -166,10 +166,19 @@ struct PendingNudge {
         self.index = index
     }
 
-    func canRetire(current: [UUID: Reminder], deletedIDs: Set<UUID>, queuedReplacement: Set<UUID>) -> Bool {
+    var generationIdentifier: String { "\(id.uuidString).\(generation.uuidString)" }
+
+    func canRetire(current: [UUID: Reminder], deletedIDs: Set<UUID>, queuedReplacement: Set<UUID>,
+                   stoppedGenerations: Set<String> = [], now: Date = .now) -> Bool {
+        if stoppedGenerations.contains(generationIdentifier) { return true }
         if deletedIDs.contains(id) { return true }
         guard let reminder = current[id] else { return false }
-        return reminder.completedAt != nil || !reminder.preferences.notifications
+        // Turning Nag Me off is explicit evidence to stop followups, even if
+        // an overdue one-shot reminder has no future replacement to accept.
+        // A future primary still needs an accepted replacement before removal.
+        let nagsStopped = reminder.hasValidSchedule && reminder.preferences.nagMinutes == 0
+            && (index > 0 || (generation != reminder.generation && reminder.alertDate <= now))
+        return reminder.completedAt != nil || !reminder.preferences.notifications || nagsStopped
             || (generation != reminder.generation && queuedReplacement.contains(id))
     }
 

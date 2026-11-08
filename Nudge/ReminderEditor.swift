@@ -14,13 +14,15 @@ struct ReminderEditor: View {
     @State private var isPM: Bool
     @State private var preferences: ReminderPreferences
     @State private var error: String?
+    @State private var didSave = false
     @FocusState private var timeFocused: Bool
 
-    init(store: ReminderStore, reminder: Reminder?) {
+    init(store: ReminderStore, reminder: Reminder?, initialDay: Date? = nil) {
         self.store = store
         original = reminder
-        let date = reminder?.due ?? .now
-        let components = Calendar.autoupdatingCurrent.dateComponents([.hour, .minute], from: date)
+        let now = Date.now
+        let date = reminder?.due ?? initialDay ?? now
+        let components = Calendar.autoupdatingCurrent.dateComponents([.hour, .minute], from: reminder?.due ?? now)
         let hour = reminder?.phoneSchedule?.hour ?? components.hour ?? 9
         let minute = reminder?.phoneSchedule?.minute ?? components.minute ?? 0
         _title = State(initialValue: reminder?.title ?? "")
@@ -61,6 +63,7 @@ struct ReminderEditor: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .buttonBorderShape(.roundedRectangle(radius: 15))
+                    .disabled(didSave)
                     if original == nil {
                         Label("Starting with your saved defaults.", systemImage: "slider.horizontal.3")
                             .font(.footnote).foregroundStyle(palette.secondary)
@@ -78,7 +81,9 @@ struct ReminderEditor: View {
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Save", action: save).fontWeight(.semibold) }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save", action: save).fontWeight(.semibold).disabled(didSave)
+                }
                 ToolbarItemGroup(placement: .keyboard) {
                     if timeFocused {
                         Spacer()
@@ -111,10 +116,12 @@ struct ReminderEditor: View {
                 .foregroundStyle(palette.secondary)
             DatePicker("Date", selection: $day, displayedComponents: .date)
                 .font(.subheadline)
-            HStack(spacing: 6) {
-                dateShortcut(0)
-                dateShortcut(1)
-                dateShortcut(3)
+            TimelineView(.periodic(from: .now, by: 15)) { context in
+                HStack(spacing: 6) {
+                    dateShortcut(0, now: context.date)
+                    dateShortcut(1, now: context.date)
+                    dateShortcut(3, now: context.date)
+                }
             }
             if let schedule = parsedSchedule, let date = schedule.dueDate() {
                 let local = Calendar.autoupdatingCurrent.dateComponents([.hour, .minute], from: date)
@@ -147,11 +154,17 @@ struct ReminderEditor: View {
     }
 
     @ViewBuilder
-    private func dateShortcut(_ days: Int) -> some View {
+    private func dateShortcut(_ days: Int, now: Date) -> some View {
         let calendar = Calendar.autoupdatingCurrent
-        if let date = calendar.date(byAdding: .day, value: days, to: .now) {
+        if let date = ReminderEditorDraft.shortcutDate(days: days, now: now, calendar: calendar) {
             let name = days == 0 ? "Today" : days == 1 ? "Tomorrow" : date.formatted(.dateTime.weekday(.wide))
-            Button(name) { day = date }
+            Button(name) {
+                // A tap at midnight must use the current day even if the next
+                // label refresh has not happened. Never move the draft by itself.
+                if let currentDate = ReminderEditorDraft.shortcutDate(days: days, now: .now) {
+                    day = currentDate
+                }
+            }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(calendar.isDate(day, inSameDayAs: date) ? palette.accent : palette.secondary)
@@ -159,59 +172,22 @@ struct ReminderEditor: View {
     }
 
     private var parsedSchedule: PhoneSchedule? {
-        let input = time.trimmingCharacters(in: .whitespacesAndNewlines)
-        let parts = input.split(separator: ":", omittingEmptySubsequences: false)
-        let hour: Int?
-        let minute: Int?
-        if parts.count == 2, parts.allSatisfy({ (1...2).contains($0.count) }) {
-            hour = Int(parts[0])
-            minute = Int(parts[1])
-        } else if parts.count == 1 && (3...4).contains(input.count) {
-            hour = Int(input.dropLast(2))
-            minute = Int(input.suffix(2))
-        } else if parts.count == 1 && (1...2).contains(input.count) {
-            hour = Int(input)
-            minute = 0
-        } else {
-            return nil
-        }
-        guard let hour, let minute, (1...12).contains(hour), (0...59).contains(minute) else { return nil }
-        return PhoneSchedule(day: day, hour: hour % 12 + (isPM ? 12 : 0), minute: minute)
+        ReminderEditorDraft.schedule(time: time, day: day, isPM: isPM)
     }
 
     private func save() {
-        let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { error = "Enter a reminder title."; return }
-        guard !time.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            error = "Enter a reminder time."
-            return
+        guard !didSave else { return }
+        do {
+            let reminder = try ReminderEditorDraft.reminder(original: original, title: title, notes: notes,
+                                                           day: day, time: time, isPM: isPM, preferences: preferences)
+            if let message = store.save(reminder, replacing: original?.generation, expecting: original) {
+                error = message
+                return
+            }
+            didSave = true
+            dismiss()
+        } catch {
+            self.error = error.localizedDescription
         }
-        guard var schedule = parsedSchedule, let date = schedule.dueDate() else {
-            error = "Enter a valid time, such as 830 for 8:30."
-            return
-        }
-        guard preferences.repeatRule != .custom || !preferences.weekdays.isEmpty else {
-            error = "Choose at least one repeat day."
-            return
-        }
-        let previous = original?.phoneSchedule
-        let sameClock = previous?.day == schedule.day && previous?.hour == schedule.hour && previous?.minute == schedule.minute
-        let sameTestMinute = previous == nil && original.map {
-            Calendar.autoupdatingCurrent.isDate($0.due, equalTo: date, toGranularity: .minute)
-        } == true
-        guard sameClock || sameTestMinute || date > .now else { error = "Choose a future date and time."; return }
-        if sameClock, let previous { schedule.anchorDay = previous.anchorDay }
-        var reminder = original ?? Reminder(title: name, notes: notes, due: date,
-                                             repeatAnchor: date, preferences: preferences)
-        reminder.title = name
-        reminder.notes = notes
-        reminder.due = sameTestMinute ? (original?.due ?? date) : date
-        reminder.phoneSchedule = sameTestMinute ? nil : schedule
-        reminder.preferences = preferences
-        if let message = store.save(reminder, replacing: original?.generation) {
-            error = message
-            return
-        }
-        dismiss()
     }
 }

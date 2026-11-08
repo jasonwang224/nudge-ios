@@ -126,7 +126,9 @@ struct PreferenceFields: View {
                         ForEach(1...7, id: \.self) { day in
                             let calendar = Calendar.autoupdatingCurrent
                             chip(calendar.veryShortWeekdaySymbols[day - 1], selected: preferences.weekdays.contains(day)) {
-                                if preferences.weekdays.contains(day) { preferences.weekdays.remove(day) }
+                                if preferences.weekdays.contains(day) {
+                                    if preferences.weekdays.count > 1 { preferences.weekdays.remove(day) }
+                                }
                                 else { preferences.weekdays.insert(day) }
                             }
                             .accessibilityLabel(calendar.weekdaySymbols[day - 1])
@@ -134,6 +136,12 @@ struct PreferenceFields: View {
                     }
                     .padding(.horizontal, 12)
                     .padding(.bottom, 10)
+                    Text(preferences.weekdays.isEmpty ? "Choose at least one repeat day." : "Keep at least one repeat day selected.")
+                        .font(.footnote)
+                        .foregroundStyle(preferences.weekdays.isEmpty ? palette.accent : palette.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 10)
                 }
                 Divider().overlay(palette.line)
                 row("Notifications", icon: "bell", color: palette.coral) {

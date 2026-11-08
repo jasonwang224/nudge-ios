@@ -4,11 +4,22 @@ struct ReminderSnapshot: Codable, Equatable {
     var version = 1
     var reminders: [Reminder] = []
     var deletedIDs: Set<UUID> = []
+    // Additive/optional so existing version-1 databases remain readable.
+    // A completed occurrence must stop even if permission prevents its next
+    // occurrence from being queued. Each token names one exact id + generation.
+    var stoppedNotificationGenerations: Set<String>?
 
     func validated() throws -> Self {
+        let activeGenerations = Set(reminders.filter { $0.completedAt == nil }.map {
+            "\($0.id.uuidString).\($0.generation.uuidString)"
+        })
         guard version == 1,
               Set(reminders.map(\.id)).count == reminders.count,
-              reminders.allSatisfy({ !deletedIDs.contains($0.id) && $0.hasValidSchedule }) else {
+              reminders.allSatisfy({ !deletedIDs.contains($0.id) && $0.hasValidSchedule }),
+              (stoppedNotificationGenerations ?? []).allSatisfy({ token in
+                  guard let request = PendingNudge("nudge.\(token).0") else { return false }
+                  return request.generationIdentifier == token && !activeGenerations.contains(token)
+              }) else {
             throw ReminderDatabase.Problem.invalid
         }
         return self

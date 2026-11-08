@@ -6,15 +6,7 @@ output="$root/artifacts"
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/nudge-build.XXXXXXXX")"
 trap 'rm -rf "$tmp"' EXIT
 
-xcrun swiftc "$root/Nudge/Reminder.swift" "$root/Checks/Agenda/main.swift" \
-    -o "$tmp/agenda-checks"
-"$tmp/agenda-checks"
-
-xcrun swiftc -framework UserNotifications \
-    "$root/Nudge/Reminder.swift" "$root/Nudge/ReminderDatabase.swift" \
-    "$root/Nudge/NagDelivery.swift" "$root/Nudge/NotificationRequestFactory.swift" \
-    "$root/Checks/main.swift" -o "$tmp/reminder-checks"
-"$tmp/reminder-checks"
+bash "$root/scripts/check-source.sh"
 
 xcodebuild -project "$root/Nudge.xcodeproj" -target Nudge -configuration Release \
     -sdk iphoneos "CONFIGURATION_BUILD_DIR=$tmp/products" "OBJROOT=$tmp/obj" \
