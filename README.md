@@ -2,11 +2,11 @@
 
 Native SwiftUI reminder app for the iPhone 11 Pro on iOS 17.4.1. The deployment target is iOS 17.4.
 
-On a Mac with Xcode, run `bash scripts/build-ipa.sh`. GitHub Actions runs the same script on macOS, checking agenda/calendar behavior, notifications, and database safeguards before building. Download the **Nudge-1.0.7-Unsigned** artifact and extract the IPA. Use a sideloading tool to sign it with a provisioning profile for your iPhone. This is build 9, using the existing `com.jasonwang224.nudge` identifier. Install over the existing app with the same signing account and app identifier to retain its reminders, then open Nudge once to refresh queued notifications.
+On a Mac with Xcode, run `bash scripts/build-ipa.sh`. GitHub Actions runs the same script on macOS, checking agenda/calendar behavior, notifications, and database safeguards before building. Download the **Nudge-1.0.8-Unsigned** artifact and extract the IPA. Use a sideloading tool to sign it with a provisioning profile for your iPhone. This is build 10, using the existing `com.jasonwang224.nudge` identifier. Install over the existing app with the same signing account and app identifier to retain its reminders, then open Nudge once to refresh queued notifications.
 
-## Next update — whole-app audit, source only
+## Version 1.0.8 (10) — whole-app audit fixes
 
-No new app or IPA has been built for these changes. The latest installed build remains 1.0.7 (9).
+This release includes the independently reviewed editor, agenda, lifecycle, and calendar fixes below. It retains normal visible nag notifications, Done, and Snooze 15 min. The database format remains version 1 with backward-compatible optional fields; no reminder reset is required.
 
 - Creating from a future date in Today now starts the editor on that date. Today/Tomorrow/day-name shortcuts refresh across midnight and calculate from the current phone date when tapped. The highlighted card has the same eligible actions as normal rows. Today filters completion history by completion date; Upcoming retains all history.
 - Changing repeat patterns reanchors the series to the displayed date. Changing only the time preserves month-end anchors. Repeat edits preserve an active Snooze; changing its actual date/time reschedules it and ends that Snooze.
@@ -20,7 +20,7 @@ No new app or IPA has been built for these changes. The latest installed build r
 - Explicit Done/Delete/notification-off cancellation runs even when notification permission is denied. Done settles in-flight scheduling, gathers older queued generations left by failed edits, rechecks the current occurrence, and saves exact completion-stop records atomically. The added optional field preserves existing version-1 database compatibility. Notification removal remains scoped; missing data never authorizes clearing alerts.
 - Scheduling failures and queue capacity warnings are visible from the agenda. Notifications-off cards do not promise an alert.
 
-`bash scripts/check-source.sh` parses and type-checks the complete app against iOS 17.4 without building an app. It executes seven source test suites covering editor validation and defaults, repeat/date projections, agenda sections, calendar/time-zone changes, complete reminder lifecycles and persistence, and 420 repeat/nag/sound/notification combinations. The IPA build script also runs this same suite before a future authorized build.
+`bash scripts/check-source.sh` parses and type-checks the complete app against iOS 17.4 without building an app. It executes seven source test suites covering editor validation and defaults, repeat/date projections, agenda sections, calendar/time-zone changes, complete reminder lifecycles and persistence, and 420 repeat/nag/sound/notification combinations. The IPA build script runs this same suite before packaging each release.
 
 The checks exercise the production helpers used by the SwiftUI views and store. Native layout, Dynamic Type, VoiceOver, system permissions, actual audio/haptics, and closed-app Lock Screen delivery still require simulator/device testing. Source tests do not substitute for those runtime checks. Restoring a completed past occurrence returns it to Needs attention at its original time; it does not invent a new due time or change the active recurring series.
 
