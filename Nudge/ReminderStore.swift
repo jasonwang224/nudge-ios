@@ -93,8 +93,13 @@ final class ReminderStore: ObservableObject {
             .filter { $0.id == reminder.id }
         let observed = Set(owned.map(\.generationIdentifier))
         guard let change = ReminderLifecycle.completing(reminder, in: snapshot, now: now,
-                                                       observedGenerations: observed),
-              commit(change.snapshot, retiring: change.retiring) == nil else { return }
+                                                       observedGenerations: observed) else {
+            let message = "Nudge couldn’t determine the next repeat date. Edit this reminder’s date and repeat settings, then try Done again."
+            schedulingIssue = message
+            status = message
+            return
+        }
+        guard commit(change.snapshot, retiring: change.retiring) == nil else { return }
         let oldCards = delivered.compactMap { item -> String? in
             guard let request = PendingNudge(item.request.identifier), request.id == reminder.id,
                   observed.contains(request.generationIdentifier) else { return nil }
@@ -136,16 +141,7 @@ final class ReminderStore: ObservableObject {
 
     func refresh() {
         if loadDatabase() {
-            let calendar = Calendar.autoupdatingCurrent
-            var adjusted = snapshot
-            for index in adjusted.reminders.indices where adjusted.reminders[index].completedAt == nil {
-                guard let due = adjusted.reminders[index].phoneSchedule?.dueDate(calendar: calendar),
-                      adjusted.reminders[index].due != due else { continue }
-                if adjusted.reminders[index].snoozedUntil == nil {
-                    adjusted.reminders[index].generation = UUID()
-                }
-                adjusted.reminders[index].due = due
-            }
+            let adjusted = ReminderLifecycle.refreshingSchedules(in: snapshot)
             if adjusted != snapshot {
                 commit(adjusted)
                 return

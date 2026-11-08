@@ -43,24 +43,95 @@ struct PhoneSchedule: Codable, Equatable {
     var anchorDay: DateComponents
     var hour: Int
     var minute: Int
+    // Freeze chronology, not timezone. A phone calendar preference must never
+    // reinterpret a saved year/era in another calendar.
+    var storedCalendar: Calendar?
+    // Only the current explicitly chosen date can use the second repeated hour.
+    // Future recurring dates continue to use the first matching local time.
+    var prefersSecondOccurrence: Bool?
 
     init(day: Date, hour: Int, minute: Int, calendar: Calendar = .autoupdatingCurrent) {
         self.day = calendar.dateComponents([.era, .year, .month, .day], from: day)
         anchorDay = self.day
         self.hour = hour
         self.minute = minute
+        storedCalendar = Calendar(identifier: calendar.identifier)
+        prefersSecondOccurrence = nil
     }
 
-    func dueDate(calendar: Calendar = .autoupdatingCurrent) -> Date? {
-        guard let day = calendar.date(from: day) else { return nil }
-        return time(on: day, calendar: calendar)
+    func dueDate(referenceDate: Date? = nil, calendar: Calendar = .autoupdatingCurrent) -> Date? {
+        let resolved: Calendar?
+        if let storedCalendar {
+            resolved = Self.withCurrentTimeZone(storedCalendar, from: calendar)
+        } else if let referenceDate {
+            resolved = resolvedCalendar(relativeTo: referenceDate, calendar: calendar)
+        } else {
+            resolved = nil
+        }
+        guard let resolved, let date = resolved.date(from: day) else { return nil }
+        return time(on: date, calendar: resolved,
+                    repeatedTimePolicy: prefersSecondOccurrence == true ? .last : .first)
+    }
+
+    func resolvedCalendar(relativeTo referenceDate: Date,
+                          calendar: Calendar = .autoupdatingCurrent) -> Calendar? {
+        if let storedCalendar { return Self.withCurrentTimeZone(storedCalendar, from: calendar) }
+
+        // Legacy components have no calendar identity. Infer only a unique
+        // chronology compatible with the persisted absolute date; never assume
+        // Gregorian or stamp the phone's newly selected calendar onto old data.
+        // Allow a full timezone change plus one repeated DST hour. Similar
+        // Islamic calendar variants may remain ambiguous and stay untouched.
+        let identifiers: [Calendar.Identifier] = [
+            .gregorian, .buddhist, .chinese, .coptic, .ethiopicAmeteMihret,
+            .ethiopicAmeteAlem, .hebrew, .indian, .islamic, .islamicCivil,
+            .japanese, .persian, .republicOfChina, .islamicTabular, .islamicUmmAlQura
+        ]
+        let matches = identifiers.compactMap { identifier -> Calendar? in
+            var candidate = Calendar(identifier: identifier)
+            candidate.timeZone = calendar.timeZone
+            guard let date = candidate.date(from: day),
+                  Self.sameDayComponents(day, candidate.dateComponents([.era, .year, .month, .day], from: date)),
+                  let first = time(on: date, calendar: candidate, repeatedTimePolicy: .first),
+                  let last = time(on: date, calendar: candidate, repeatedTimePolicy: .last),
+                  min(abs(first.timeIntervalSince(referenceDate)), abs(last.timeIntervalSince(referenceDate))) <= 27 * 3600
+            else { return nil }
+            return candidate
+        }
+        // ISO 8601 and Gregorian have identical era/year/month/day arithmetic;
+        // a legacy ISO record is deliberately represented by Gregorian above.
+        return matches.count == 1 ? matches[0] : nil
+    }
+
+    func resolvingCalendar(relativeTo referenceDate: Date,
+                           calendar: Calendar = .autoupdatingCurrent) -> Self? {
+        guard let resolved = resolvedCalendar(relativeTo: referenceDate, calendar: calendar) else { return nil }
+        var result = self
+        if result.storedCalendar == nil { result.storedCalendar = Calendar(identifier: resolved.identifier) }
+        return result
     }
 
     func time(on day: Date, calendar: Calendar) -> Date? {
+        time(on: day, calendar: calendar, repeatedTimePolicy: .first)
+    }
+
+    private func time(on day: Date, calendar: Calendar,
+                      repeatedTimePolicy: Calendar.RepeatedTimePolicy) -> Date? {
         guard let time = calendar.date(bySettingHour: hour, minute: minute, second: 0, of: day,
-                                       matchingPolicy: .nextTime, repeatedTimePolicy: .first),
+                                       matchingPolicy: .nextTime, repeatedTimePolicy: repeatedTimePolicy),
               calendar.isDate(day, inSameDayAs: time) else { return nil }
         return time
+    }
+
+    private static func withCurrentTimeZone(_ stored: Calendar, from current: Calendar) -> Calendar {
+        var result = Calendar(identifier: stored.identifier)
+        result.timeZone = current.timeZone
+        return result
+    }
+
+    private static func sameDayComponents(_ lhs: DateComponents, _ rhs: DateComponents) -> Bool {
+        lhs.era == rhs.era && lhs.year == rhs.year && lhs.month == rhs.month && lhs.day == rhs.day
+            && (lhs.isLeapMonth == nil || lhs.isLeapMonth == rhs.isLeapMonth)
     }
 }
 
@@ -90,9 +161,16 @@ struct Reminder: Codable, Identifiable, Equatable {
             && (phoneSchedule.map { (0...23).contains($0.hour) && (0...59).contains($0.minute) } ?? true)
     }
 
-    func nextOccurrence(after now: Date, calendar: Calendar = .autoupdatingCurrent) -> Date? {
+    func nextOccurrence(after now: Date, calendar currentCalendar: Calendar = .autoupdatingCurrent) -> Date? {
         let rule = preferences.repeatRule
         guard rule != .never else { return nil }
+        let calendar: Calendar
+        if let phoneSchedule {
+            guard let resolved = phoneSchedule.resolvedCalendar(relativeTo: due, calendar: currentCalendar) else { return nil }
+            calendar = resolved
+        } else {
+            calendar = currentCalendar
+        }
         let cutoff = max(now, due)
         let anchor = phoneSchedule.flatMap { calendar.date(from: $0.anchorDay) } ?? repeatAnchor
         let anchorDay = calendar.startOfDay(for: anchor)

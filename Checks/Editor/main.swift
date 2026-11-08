@@ -162,4 +162,80 @@ let fallNext = ReminderEditorDraft.shortcutDate(days: 1, now: date(2026, 11, 1, 
 expect(fallNext == date(2026, 11, 2) && fallNext.timeIntervalSince(date(2026, 11, 1)) == 25 * 60 * 60,
        "Shortcut used 24 elapsed hours instead of a calendar day during fall DST")
 
-print("Editor time/AM-PM, validation, defaults isolation, repeat anchors, snooze preservation, legacy editing, date shortcuts, and DST checks passed.")
+// Repeated clock times: choose the remaining future occurrence, and preserve it
+// when editing the same reminder later instead of silently jumping backwards.
+let iso = ISO8601DateFormatter()
+let firstFold = iso.date(from: "2026-11-01T08:30:00Z")!
+let secondFold = iso.date(from: "2026-11-01T09:30:00Z")!
+let betweenFolds = iso.date(from: "2026-11-01T08:45:00Z")!
+let foldDay = date(2026, 11, 1)
+let secondDraft = try ReminderEditorDraft.reminder(original: nil, title: "Fall reminder", notes: "", day: foldDay,
+                                                  time: "130", isPM: false, preferences: daily,
+                                                  now: betweenFolds, calendar: calendar)
+expect(secondDraft.due == secondFold && secondDraft.phoneSchedule?.prefersSecondOccurrence == true,
+       "Editor rejected or selected the past first occurrence while the second was still future")
+let secondPreview = ReminderEditorDraft.schedule(time: "130", day: foldDay, isPM: false,
+                                                 now: betweenFolds, calendar: calendar)
+expect(secondPreview?.dueDate(calendar: calendar) == secondFold, "Editor preview and saved fold time disagree")
+let secondRenamed = try ReminderEditorDraft.reminder(original: secondDraft, title: "Renamed", notes: "", day: foldDay,
+                                                    time: "130", isPM: false, preferences: daily,
+                                                    now: iso.date(from: "2026-11-01T10:00:00Z")!, calendar: calendar)
+expect(secondRenamed.due == secondFold && secondRenamed.phoneSchedule == secondDraft.phoneSchedule,
+       "Metadata edit changed the chosen repeated-time occurrence")
+let firstDraft = try ReminderEditorDraft.reminder(original: nil, title: "First fall reminder", notes: "", day: foldDay,
+                                                 time: "130", isPM: false, preferences: daily,
+                                                 now: iso.date(from: "2026-11-01T08:00:00Z")!, calendar: calendar)
+expect(firstDraft.due == firstFold && firstDraft.phoneSchedule?.prefersSecondOccurrence != true,
+       "Editor should choose the first occurrence when both are still future")
+let firstRenamed = try ReminderEditorDraft.reminder(original: firstDraft, title: "Rename overdue first", notes: "", day: foldDay,
+                                                   time: "130", isPM: false, preferences: daily,
+                                                   now: betweenFolds, calendar: calendar)
+expect(firstRenamed.due == firstFold, "Renaming an existing first-fold reminder moved it to the second fold")
+
+// Changing the iPhone calendar must not reinterpret existing persisted year/era
+// components or overwrite their month-end anchor during an editor save.
+let otherIdentifiers: [Calendar.Identifier] = [.japanese, .buddhist]
+for identifier in otherIdentifiers {
+    var otherCalendar = Calendar(identifier: identifier)
+    otherCalendar.timeZone = calendar.timeZone
+    let underOtherCalendar = try ReminderEditorDraft.reminder(original: november, title: "Calendar switched", notes: "",
+                                                              day: november.due, time: "830", isPM: false,
+                                                              preferences: monthly, now: now, calendar: otherCalendar)
+    expect(underOtherCalendar.due == november.due, "Editor reinterpreted stored calendar components after a phone calendar switch")
+    expect(underOtherCalendar.phoneSchedule?.anchorDay == november.phoneSchedule?.anchorDay,
+           "Calendar switch changed the stored monthly anchor")
+    expect(underOtherCalendar.phoneSchedule?.storedCalendar?.identifier == .gregorian,
+           "Editor overwrote an existing reminder's calendar identity")
+    var inferredLegacy = november
+    inferredLegacy.phoneSchedule?.storedCalendar = nil
+    let inferredEdit = try ReminderEditorDraft.reminder(original: inferredLegacy, title: "Legacy calendar switched", notes: "",
+                                                        day: inferredLegacy.due, time: "830", isPM: false,
+                                                        preferences: monthly, now: now, calendar: otherCalendar)
+    expect(inferredEdit.due == inferredLegacy.due && inferredEdit.phoneSchedule?.storedCalendar?.identifier == .gregorian,
+           "Editor did not safely infer and retain a legacy calendar after phone calendar changed")
+}
+
+var islamicCivil = Calendar(identifier: .islamicCivil)
+islamicCivil.timeZone = calendar.timeZone
+let ambiguousDue = date(2026, 11, 8, 8, 30)
+var ambiguousSchedule = PhoneSchedule(day: ambiguousDue, hour: 8, minute: 30, calendar: islamicCivil)
+ambiguousSchedule.storedCalendar = nil
+let ambiguous = Reminder(title: "Legacy ambiguous calendar", notes: "Keep", due: ambiguousDue,
+                          repeatAnchor: ambiguousDue, preferences: monthly, phoneSchedule: ambiguousSchedule)
+expect(ambiguousSchedule.resolvedCalendar(relativeTo: ambiguousDue, calendar: calendar) == nil,
+       "Expected genuinely ambiguous Civil/Tabular legacy calendar fixture")
+let originalAmbiguous = ambiguous
+expectProblem(.unconfirmedCalendar, "ambiguous legacy metadata edit") {
+    try draft(original: ambiguous, title: "Rename", day: ambiguous.due, preferences: monthly)
+}
+expect(ambiguous == originalAmbiguous, "Refused edit modified the ambiguous original reminder")
+let repairedDay = try draft(original: ambiguous, title: "Confirmed date", day: date(2026, 11, 9), preferences: monthly)
+expect(repairedDay.due == date(2026, 11, 9, 8, 30) && repairedDay.phoneSchedule?.storedCalendar?.identifier == .gregorian,
+       "Explicit date change did not confirm a new schedule in the phone's current calendar")
+expect(repairedDay.repeatAnchor == repairedDay.due && repairedDay.phoneSchedule?.anchorDay == repairedDay.phoneSchedule?.day,
+       "Calendar repair retained ambiguous repeat anchors")
+let repairedClock = try draft(original: ambiguous, title: "Confirmed time", day: ambiguous.due, time: "930", preferences: monthly)
+expect(repairedClock.due == date(2026, 11, 8, 9, 30) && repairedClock.phoneSchedule?.storedCalendar?.identifier == .gregorian,
+       "Explicit clock change did not repair the ambiguous schedule")
+
+print("Editor time/AM-PM, validation, defaults isolation, repeat anchors, snooze preservation, legacy editing, date shortcuts, calendar identity, and DST checks passed.")

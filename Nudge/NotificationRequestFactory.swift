@@ -54,7 +54,15 @@ enum NotificationRequestFactory {
     }
 
     static func needsRewrite(_ request: UNNotificationRequest, for alert: ScheduledAlert, enabled: Bool) -> Bool {
-        request.content.userInfo[NagDelivery.versionKey] as? Int != NagDelivery.payloadVersion
+        // A system calendar change can reinterpret an existing calendar trigger
+        // while the saved reminder's absolute date and identifier stay the same.
+        // Reconcile that request in place when Nudge next refreshes. Interval
+        // triggers are excluded: querying their next date can restart the delay.
+        if let calendarTrigger = request.trigger as? UNCalendarNotificationTrigger {
+            guard let next = calendarTrigger.nextTriggerDate(),
+                  abs(next.timeIntervalSince(alert.date)) < 1 else { return true }
+        }
+        return request.content.userInfo[NagDelivery.versionKey] as? Int != NagDelivery.payloadVersion
             || isSoundOnly(request.content) != NagDelivery.isSoundOnly(alert, enabled: enabled)
     }
 

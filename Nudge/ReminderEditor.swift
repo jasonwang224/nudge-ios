@@ -22,7 +22,10 @@ struct ReminderEditor: View {
         original = reminder
         let now = Date.now
         let date = reminder?.due ?? initialDay ?? now
-        let components = Calendar.autoupdatingCurrent.dateComponents([.hour, .minute], from: reminder?.due ?? now)
+        let calendar = reminder.flatMap {
+            $0.phoneSchedule?.resolvedCalendar(relativeTo: $0.due)
+        } ?? Calendar.autoupdatingCurrent
+        let components = calendar.dateComponents([.hour, .minute], from: reminder?.due ?? now)
         let hour = reminder?.phoneSchedule?.hour ?? components.hour ?? 9
         let minute = reminder?.phoneSchedule?.minute ?? components.minute ?? 0
         _title = State(initialValue: reminder?.title ?? "")
@@ -134,6 +137,10 @@ struct ReminderEditor: View {
                         Text("The clock skips that time on this date. Nudge will use the next available time.")
                             .font(.footnote).foregroundStyle(palette.secondary)
                     }
+                    if schedule.prefersSecondOccurrence == true {
+                        Text("Using the later occurrence of this repeated clock time.")
+                            .font(.footnote).foregroundStyle(palette.secondary)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(12)
@@ -172,7 +179,7 @@ struct ReminderEditor: View {
     }
 
     private var parsedSchedule: PhoneSchedule? {
-        ReminderEditorDraft.schedule(time: time, day: day, isPM: isPM)
+        ReminderEditorDraft.schedule(time: time, day: day, isPM: isPM, original: original)
     }
 
     private func save() {

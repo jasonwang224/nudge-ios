@@ -25,7 +25,7 @@ xcrun swiftc -framework UserNotifications "${models[@]}" "$root/Checks/main.swif
     -o "$check_dir/scheduling-checks"
 "$check_dir/scheduling-checks"
 
-for suite in Agenda AgendaUI Editor Lifecycle Interactions CalendarProbe; do
+for suite in Agenda AgendaUI Editor Lifecycle Interactions Calendar; do
     xcrun swiftc -framework UserNotifications "${models[@]}" "$root/Checks/$suite/main.swift" \
         -o "$check_dir/$suite-checks"
     "$check_dir/$suite-checks"

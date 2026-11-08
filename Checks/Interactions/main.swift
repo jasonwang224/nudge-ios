@@ -119,4 +119,18 @@ precondition(december.upcoming.first { $0.reminder.id == series.id }?.date == lo
 precondition(december.upcoming.first { $0.reminder.id == series.id }?.isProjected == false)
 precondition(finished.snapshot.reminders.first { $0.id == other.id } == other)
 
+// A queued calendar trigger can change interpretation after a system calendar
+// switch even if its payload and reminder generation are unchanged.
+var calendarReminder = other
+calendarReminder.phoneSchedule = PhoneSchedule(day: due, hour: calendar.component(.hour, from: due),
+                                               minute: calendar.component(.minute, from: due), calendar: calendar)
+let calendarAlert = ScheduledAlert(reminder: calendarReminder, index: 0, date: due)
+let expectedRequest = NotificationRequestFactory.make(for: calendarAlert, soundOnlyEnabled: false, now: now)
+precondition(!NotificationRequestFactory.needsRewrite(expectedRequest, for: calendarAlert, enabled: false))
+let wrongDate = DateComponents(year: 2500, month: 11, day: 8, hour: 8, minute: 30)
+let reinterpreted = UNNotificationRequest(identifier: expectedRequest.identifier, content: expectedRequest.content,
+                                          trigger: UNCalendarNotificationTrigger(dateMatching: wrongDate, repeats: false))
+precondition(NotificationRequestFactory.needsRewrite(reinterpreted, for: calendarAlert, enabled: false),
+             "Reopening must repair a reinterpreted calendar trigger without discarding the reminder.")
+
 print("All 420 repeat/nag/sound/notification combinations, snooze/completion integration, Nag Off isolation, capacity, and editor-to-agenda checks passed.")
