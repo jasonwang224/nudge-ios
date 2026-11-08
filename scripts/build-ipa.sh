@@ -6,6 +6,10 @@ output="$root/artifacts"
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/nudge-build.XXXXXXXX")"
 trap 'rm -rf "$tmp"' EXIT
 
+xcrun swiftc "$root/Nudge/Reminder.swift" "$root/Checks/Agenda/main.swift" \
+    -o "$tmp/agenda-checks"
+"$tmp/agenda-checks"
+
 xcrun swiftc -framework UserNotifications \
     "$root/Nudge/Reminder.swift" "$root/Nudge/ReminderDatabase.swift" \
     "$root/Nudge/NagDelivery.swift" "$root/Nudge/NotificationRequestFactory.swift" \
@@ -18,14 +22,14 @@ xcodebuild -project "$root/Nudge.xcodeproj" -target Nudge -configuration Release
 
 app="$tmp/products/Nudge.app"
 test "$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$app/Info.plist")" = "17.4"
-test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Info.plist")" = "1.0.6"
+test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Info.plist")" = "1.0.7"
 test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")" = "com.jasonwang224.nudge"
-test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Info.plist")" = "8"
+test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Info.plist")" = "9"
 test "$(xcrun lipo -archs "$app/Nudge")" = "arm64"
 
 mkdir -p "$tmp/Payload" "$output"
 ditto "$app" "$tmp/Payload/Nudge.app"
-ipa="$output/Nudge-1.0.6-Unsigned.ipa"
+ipa="$output/Nudge-1.0.7-Unsigned.ipa"
 rm -f "$ipa"
 (cd "$tmp" && zip -qry "$ipa" Payload)
 unzip -tq "$ipa"

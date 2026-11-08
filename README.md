@@ -2,11 +2,11 @@
 
 Native SwiftUI reminder app for the iPhone 11 Pro on iOS 17.4.1. The deployment target is iOS 17.4.
 
-On a Mac with Xcode, run `bash scripts/build-ipa.sh`. GitHub Actions runs the same script on macOS. Download the **Nudge-1.0.6-Unsigned** artifact and extract the IPA. Use a sideloading tool to sign it with a provisioning profile for your iPhone. This is build 8, using the existing `com.jasonwang224.nudge` identifier. Install with the same signing account and app identifier.
+On a Mac with Xcode, run `bash scripts/build-ipa.sh`. GitHub Actions runs the same script on macOS, checking agenda/calendar behavior, notifications, and database safeguards before building. Download the **Nudge-1.0.7-Unsigned** artifact and extract the IPA. Use a sideloading tool to sign it with a provisioning profile for your iPhone. This is build 9, using the existing `com.jasonwang224.nudge` identifier. Install over the existing app with the same signing account and app identifier to retain its reminders, then open Nudge once to refresh queued notifications.
 
-## Next update — source only, no new IPA
+## Version 1.0.7 (9)
 
-Settings no longer contains the notification preview or the sound-only experiment section. Sound-only mode is disabled in the app regardless of the previous saved toggle. On opening this source version, reconciliation replaces safely-future sound-only requests with normal visible nags under the same identifiers; reminders are preserved. The installed 1.0.6 IPA is unchanged until a new build is requested.
+Settings no longer contains the notification preview or the sound-only experiment section. Sound-only mode is disabled in the app regardless of the previous saved toggle. On opening this version, reconciliation replaces safely-future sound-only requests with normal visible nags under the same identifiers; reminders are preserved. Nags use full notifications with the selected sound and existing Done and Snooze 15 min actions. Multiple cards can accumulate while the app is closed. The single-notification investigation is on hold; this release introduces no new notification experiment.
 
 The Today date strip now shows planned recurring occurrences on future days, including daily, weekday, weekly, monthly, and custom repeats. Dates and indicator dots use the same calendar projection. Future previews keep the original reminder as their source; they cannot complete or snooze today's occurrence. Editing and deleting a future preview targets the repeating reminder. Projections do not add database records or change notification scheduling. Completing the current occurrence still advances the actual recurring schedule.
 
@@ -22,7 +22,7 @@ Both previous experiments failed on the user's iOS 17.4.1 device. The expiration
 
 ## Archived sound-only nag experiment (1.0.6)
 
-The following describes the previously built IPA, not the current source. Its sound-only behavior failed the device test and is disabled in the next update.
+The following describes the previously built 1.0.6 IPA, not the current source. Its sound-only behavior failed the device test and is disabled in 1.0.7.
 
 **Settings → Sound-only Nag Test → Sound-only nags** is on by default. For new reminders with a sound selected, the first notification contains the reminder text and the **Done** and **Snooze 15 min** actions. Later nags request only that sound, with no alert text. They use the reminder's selected interval, including two or five minutes. This is a device experiment: verify sound, vibration, and the absence of extra cards on iOS 17.4.1 before relying on it.
 
