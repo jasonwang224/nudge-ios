@@ -263,3 +263,59 @@ struct AlertPlan {
                               date: alert.date.addingTimeInterval(TimeInterval(minutes * 60)))
     }
 }
+
+// An agenda row is a view of a series, not another saved reminder or queued alert.
+// Projected rows keep the original reminder so editing still edits the series.
+struct ReminderOccurrence: Identifiable {
+    struct ID: Hashable {
+        let reminderID: UUID
+        let date: Date
+    }
+
+    let reminder: Reminder
+    let date: Date
+    let isProjected: Bool
+
+    var id: ID { ID(reminderID: reminder.id, date: date) }
+
+    init(_ reminder: Reminder) {
+        self.reminder = reminder
+        date = reminder.alertDate
+        isProjected = false
+    }
+
+    private init(_ reminder: Reminder, projectedDate: Date) {
+        self.reminder = reminder
+        date = projectedDate
+        isProjected = true
+    }
+
+    static func entries(reminders: [Reminder], on day: Date?, now: Date,
+                        calendar: Calendar = .autoupdatingCurrent) -> [Self] {
+        let active = reminders.filter { $0.completedAt == nil }
+        guard let day else { return sorted(active.map(Self.init)) }
+        let dayStart = calendar.startOfDay(for: day)
+        let isToday = calendar.isDate(day, inSameDayAs: now)
+        let isFuture = dayStart > calendar.startOfDay(for: now)
+        var result: [Self] = []
+
+        for reminder in active {
+            if calendar.isDate(reminder.alertDate, inSameDayAs: day)
+                || (isToday && (reminder.alertDate <= now || reminder.snoozedUntil != nil)) {
+                result.append(Self(reminder))
+            }
+            guard isFuture, reminder.hasValidSchedule, reminder.preferences.repeatRule != .never else { continue }
+            let cutoff = max(dayStart.addingTimeInterval(-1), reminder.alertDate)
+            guard let next = reminder.nextOccurrence(after: cutoff, calendar: calendar),
+                  calendar.isDate(next, inSameDayAs: day), next != reminder.alertDate else { continue }
+            result.append(Self(reminder, projectedDate: next))
+        }
+        return sorted(result)
+    }
+
+    private static func sorted(_ entries: [Self]) -> [Self] {
+        entries.sorted {
+            $0.date == $1.date ? $0.reminder.id.uuidString < $1.reminder.id.uuidString : $0.date < $1.date
+        }
+    }
+}

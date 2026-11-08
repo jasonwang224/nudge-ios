@@ -4,7 +4,25 @@ Native SwiftUI reminder app for the iPhone 11 Pro on iOS 17.4.1. The deployment 
 
 On a Mac with Xcode, run `bash scripts/build-ipa.sh`. GitHub Actions runs the same script on macOS. Download the **Nudge-1.0.6-Unsigned** artifact and extract the IPA. Use a sideloading tool to sign it with a provisioning profile for your iPhone. This is build 8, using the existing `com.jasonwang224.nudge` identifier. Install with the same signing account and app identifier.
 
-## Sound-only nag experiment (1.0.6)
+## Next update — source only, no new IPA
+
+Settings no longer contains the notification preview or the sound-only experiment section. Sound-only mode is disabled in the app regardless of the previous saved toggle. On opening this source version, reconciliation replaces safely-future sound-only requests with normal visible nags under the same identifiers; reminders are preserved. The installed 1.0.6 IPA is unchanged until a new build is requested.
+
+The Today date strip now shows planned recurring occurrences on future days, including daily, weekday, weekly, monthly, and custom repeats. Dates and indicator dots use the same calendar projection. Future previews keep the original reminder as their source; they cannot complete or snooze today's occurrence. Editing and deleting a future preview targets the repeating reminder. Projections do not add database records or change notification scheduling. Completing the current occurrence still advances the actual recurring schedule.
+
+The `checks/**` workflow runs calendar, notification, and database checks plus iOS Swift type checking. It does not build an app or package an IPA.
+
+## Alarmed investigation — research only
+
+The strongest untried candidate is one full-content repeating notification with a stable identifier. Published iOS 18.2 code [reposts the same record](https://github.com/EthanArbuckle/iPhone17-1_18.2_22C152_Restore/blob/e26ed4563f78871c59d2d96856756a65d62517e5/System/Library/PrivateFrameworks/UserNotificationsCore.framework/UNCLocalNotificationClient.m#L916), and BulletinBoard [reuses the existing bulletin ID](https://github.com/EthanArbuckle/iPhone17-1_18.2_22C152_Restore/blob/e26ed4563f78871c59d2d96856756a65d62517e5/System/Library/PrivateFrameworks/BulletinBoard.framework/BBServer.m#L10150). This supports a test candidate, not a verified result on iOS 17.4.1 or proof of Alarmed's implementation.
+
+The legacy trigger supports a chosen future first date followed by minute repeats. A modern repeating interval supports two or five minutes, but its first delivery is one interval after scheduling; a separate arbitrary future start remains unresolved. Alarmed's [developer workaround](https://yoctoville.com/workarounds) distinguishes Relentless one-minute mode from custom Nag-Me even at the same interval. No Alarmed binary was available for direct inspection, and no repeating-request experiment was built.
+
+Both previous experiments failed on the user's iOS 17.4.1 device. The expiration property survived readback while old cards remained visible. In the sound-only test, the first full alert sounded but subsequent textless requests did not. An inspected iOS 18.2 [background-delivery path explicitly logs sound suppression for notifications without alert content](https://github.com/EthanArbuckle/iPhone17-1_18.2_22C152_Restore/blob/e26ed4563f78871c59d2d96856756a65d62517e5/System/Library/PrivateFrameworks/UserNotificationsCore.framework/UNCLocalNotificationRepository.m#L469); that matches the symptom but is not direct proof of the 17.4.1 implementation.
+
+## Archived sound-only nag experiment (1.0.6)
+
+The following describes the previously built IPA, not the current source. Its sound-only behavior failed the device test and is disabled in the next update.
 
 **Settings → Sound-only Nag Test → Sound-only nags** is on by default. For new reminders with a sound selected, the first notification contains the reminder text and the **Done** and **Snooze 15 min** actions. Later nags request only that sound, with no alert text. They use the reminder's selected interval, including two or five minutes. This is a device experiment: verify sound, vibration, and the absence of extra cards on iOS 17.4.1 before relying on it.
 

@@ -1,0 +1,39 @@
+name: Check Nudge source (no IPA)
+
+on:
+  push:
+    branches: ['checks/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse Swift source
+        run: xcrun swiftc -frontend -parse Nudge/*.swift
+      - name: Check iOS types without building an app
+        run: |
+          xcrun swiftc -typecheck -parse-as-library -module-name Nudge \
+              -target arm64-apple-ios17.4 \
+              -sdk "$(xcrun --sdk iphoneos --show-sdk-path)" Nudge/*.swift
+      - name: Run agenda and notification checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          check_dir="$(mktemp -d "$RUNNER_TEMP/nudge-checks.XXXXXXXX")"
+          trap 'rm -rf "$check_dir"' EXIT
+
+          xcrun swiftc Nudge/Reminder.swift Checks/Agenda/main.swift \
+              -o "$check_dir/agenda-checks"
+          "$check_dir/agenda-checks"
+
+          xcrun swiftc -framework UserNotifications \
+              Nudge/Reminder.swift Nudge/ReminderDatabase.swift \
+              Nudge/NagDelivery.swift Nudge/NotificationRequestFactory.swift \
+              Checks/main.swift -o "$check_dir/notification-checks"
+          "$check_dir/notification-checks"

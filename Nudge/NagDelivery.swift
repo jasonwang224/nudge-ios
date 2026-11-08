@@ -1,17 +1,15 @@
 import Foundation
 
 enum NagDelivery {
-    static let preferenceKey = "Nudge.soundOnlyNags.v1"
     static let soundOnlyKey = "nudgeSoundOnly"
     static let scheduledKey = "nudgeScheduledAt"
     static let titleKey = "nudgeReminderTitle"
     static let versionKey = "nudgePayloadVersion"
     static let payloadVersion = 2
 
-    static var enabled: Bool {
-        get { (UserDefaults.standard.object(forKey: preferenceKey) as? Bool) ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: preferenceKey) }
-    }
+    // The device experiment failed. Ignore its previously saved ON preference;
+    // reconciliation restores full-content nags before the app closes.
+    static let enabled = false
 
     static func isSoundOnly(_ alert: ScheduledAlert, enabled: Bool) -> Bool {
         guard enabled, alert.reminder.preferences.sound != .silent,

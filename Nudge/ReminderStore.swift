@@ -65,12 +65,6 @@ final class ReminderStore: ObservableObject {
         return commit(changed, retiring: retired, askPermission: saved.preferences.notifications)
     }
 
-    func setSoundOnlyNags(_ enabled: Bool) {
-        soundOnlyEnabled = enabled
-        NagDelivery.enabled = enabled
-        enqueueSync()
-    }
-
     func scheduleTest(nagMinutes: Int = 2) {
         guard [2, 5].contains(nagMinutes) else { return }
         enqueueSync(askPermission: true)
@@ -84,7 +78,7 @@ final class ReminderStore: ObservableObject {
             preferences.nagMinutes = nagMinutes
             preferences.repeatRule = .never
             preferences.sound = .chime
-            let title = self.soundOnlyEnabled ? "Sound-only test · \(nagMinutes) min" : "Control test · \(nagMinutes) min"
+            let title = "Lock Screen test · \(nagMinutes) min"
             save(Reminder(title: title, notes: "Hold this notification to try Snooze 15 min or Done.",
                           due: due, repeatAnchor: due, preferences: preferences))
         }
