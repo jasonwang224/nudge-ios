@@ -13,7 +13,8 @@ var preferences = ReminderPreferences()
 preferences.repeatRule = .daily
 var daily = Reminder(title: "Feed cat", notes: "Original", due: date(7, 8), repeatAnchor: date(1, 8), preferences: preferences)
 daily.phoneSchedule = PhoneSchedule(day: date(1, 8), hour: 8, minute: 0, calendar: calendar)
-daily.phoneSchedule?.day = calendar.dateComponents([.era, .year, .month, .day], from: daily.due)
+let dailyDueComponents = calendar.dateComponents([.era, .year, .month, .day], from: daily.due)
+daily.phoneSchedule?.day = dailyDueComponents
 let unrelated = Reminder(title: "Unrelated", notes: "Keep me", due: date(8, 18), repeatAnchor: date(8, 18), preferences: ReminderPreferences())
 let original = ReminderSnapshot(reminders: [daily, unrelated])
 precondition(ReminderLifecycle.snoozing(unrelated, in: original, now: now) == nil,
@@ -207,12 +208,11 @@ if case let .file(reloadedSnapshot) = reloaded {
 } else { preconditionFailure("Expected persisted lifecycle state.") }
 precondition(current(deletion.snapshot, unrelated.id) == unrelated)
 
-let failedEditDatabase = ReminderDatabase(url: directory.appendingPathComponent("FailedEdit.json"), preferences: disk)
 // This is a second independently-created database, with a distinct migration marker.
 let failedSuite = "Nudge.FailedEditChecks.\(UUID().uuidString)"
 let failedDisk = UserDefaults(suiteName: failedSuite)!
 defer { failedDisk.removePersistentDomain(forName: failedSuite) }
-let independentDatabase = ReminderDatabase(url: failedEditDatabase.url, preferences: failedDisk)
+let independentDatabase = ReminderDatabase(url: directory.appendingPathComponent("FailedEdit.json"), preferences: failedDisk)
 var failedSource = try independentDatabase.commit(original, replacing: .missing)
 failedSource = try independentDatabase.commit(failedEdit.snapshot, replacing: failedSource)
 failedSource = try independentDatabase.commit(completedAfterFailedEdit.snapshot, replacing: failedSource)
