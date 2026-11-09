@@ -2,11 +2,15 @@
 
 [Back to Nudge](../README.md)
 
-This document preserves the build instructions, audit notes, and development history from the original README. The current release is 1.1.3 (15). Sections explicitly labeled as experiments describe older builds and are not instructions for the current app.
+This document preserves the build instructions, audit notes, and development history from the original README. The current release is 1.1.4 (16). Sections explicitly labeled as experiments describe older builds and are not instructions for the current app.
 
 Native SwiftUI reminder app for the iPhone 11 Pro on iOS 17.4.1. The deployment target is iOS 17.4.
 
-On a Mac with Xcode, run `bash scripts/build-ipa.sh`. GitHub Actions runs the same script on macOS, checking agenda/calendar behavior, notifications, and database safeguards before building. Download the **Nudge-1.1.3-Unsigned** artifact and extract the IPA. Use a sideloading tool to sign it with a provisioning profile for your iPhone. This is build 15, using the existing `com.jasonwang224.nudge` identifier. Install over the existing app with the same signing account and app identifier to retain its reminders, then open the app once to refresh queued notifications.
+On a Mac with Xcode, run `bash scripts/build-ipa.sh`. GitHub Actions runs the same script on macOS, checking agenda/calendar behavior, notifications, and database safeguards before building. Download the **Nudge-1.1.4-Unsigned** artifact and extract the IPA. Use a sideloading tool to sign it with a provisioning profile for your iPhone. This is build 16, using the existing `com.jasonwang224.nudge` identifier. Install over the existing app with the same signing account and app identifier to retain its reminders, then open the app once to refresh queued notifications.
+
+## Version 1.1.4 (16)
+
+Glass uses the Awesome Notification sound by KoiRoylers.
 
 ## Version 1.1.3 (15)
 

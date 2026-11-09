@@ -477,7 +477,7 @@ final class ReminderStore: ObservableObject {
         func mode(_ content: UNNotificationContent) -> String {
             NotificationRequestFactory.isSoundOnly(content) ? "sound-only" : "alert"
         }
-        var lines = ["Nudge 1.1.3 (15) · iOS \(UIDevice.current.systemVersion)",
+        var lines = ["Nudge 1.1.4 (16) · iOS \(UIDevice.current.systemVersion)",
                      "Captured: \(time(.now))", "Sound-only nags: \(soundOnlyEnabled ? "ON" : "OFF")",
                      "Pending API records: \(pending.count) · Delivered API records: \(delivered.count)",
                      "API records are not a count of visible Lock Screen cards. Check the screen directly.",
