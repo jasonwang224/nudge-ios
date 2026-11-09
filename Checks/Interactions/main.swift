@@ -46,7 +46,7 @@ for rule in RepeatRule.allCases {
         }
     }
 }
-precondition(combinations == 490 && !NagDelivery.enabled)
+precondition(combinations == 588 && !NagDelivery.enabled)
 
 var preferences = ReminderPreferences()
 preferences.nagMinutes = 2
@@ -133,4 +133,4 @@ let reinterpreted = UNNotificationRequest(identifier: expectedRequest.identifier
 precondition(NotificationRequestFactory.needsRewrite(reinterpreted, for: calendarAlert, enabled: false),
              "Reopening must repair a reinterpreted calendar trigger without discarding the reminder.")
 
-print("All 490 repeat/nag/sound/notification combinations, snooze/completion integration, Nag Off isolation, capacity, and editor-to-agenda checks passed.")
+print("All \(combinations) repeat/nag/sound/notification combinations, snooze/completion integration, Nag Off isolation, capacity, and editor-to-agenda checks passed.")

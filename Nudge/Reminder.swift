@@ -17,6 +17,7 @@ enum AlertSound: String, Codable, CaseIterable, Identifiable {
     case glass = "Glass"
     case droplet = "Droplet"
     case chime = "Chime"
+    case digitalChime = "Digital Chime"
     case silent = "Silent"
 
     var id: String { rawValue }
@@ -24,6 +25,7 @@ enum AlertSound: String, Codable, CaseIterable, Identifiable {
     var fileName: String? {
         switch self {
         case .glass, .droplet, .chime: return rawValue + ".wav"
+        case .digitalChime: return "DigitalChime.wav"
         case .system, .silent: return nil
         }
     }

@@ -63,7 +63,7 @@ Tap the alert itself to open the reminder’s time menu.
 | Make it yours | What Nudge gives you |
 | --- | --- |
 | **Your usual, every time** | Save default Nag Me, repeat, notification, and sound settings. Adjust them for any individual reminder. |
-| **A sound that suits you** | Chime is selected by default. Choose Glass, Droplet, the iPhone default sound, or Silent. Preview the bundled sounds before choosing. |
+| **A sound that suits you** | Chime is selected by default. Choose Digital Chime, Glass, Droplet, the iPhone default sound, or Silent. Preview the bundled sounds before choosing. |
 | **A native iPhone feel** | Apple system typography, warm neutrals, coral accents, and Light, Dark, or System appearance. |
 | **A clearer view of your day** | A seven-day date strip, future repeat previews, Upcoming, and clear due and snoozed states. |
 | **Room for the details** | Add notes, edit a reminder, or turn its notifications off individually. |
@@ -74,9 +74,9 @@ Tap the alert itself to open the reminder’s time menu.
 
 ## Get Nudge
 
-**Current test build: 1.1.2 (14).** Built for iOS 17.4 and later, with testing centered on the iPhone 11 Pro running iOS 17.4.1.
+**Current test build: 1.1.3 (15).** Built for iOS 17.4 and later, with testing centered on the iPhone 11 Pro running iOS 17.4.1.
 
-1. Open the latest successful run in [Build Nudge IPA](https://github.com/jasonwang224/nudge-ios/actions/workflows/ipa.yml) and download **Nudge-1.1.2-Unsigned** from **Artifacts**. Extract the ZIP to find the IPA. GitHub sign-in and repository access are required. Artifacts are time-limited.
+1. Open the latest successful run in [Build Nudge IPA](https://github.com/jasonwang224/nudge-ios/actions/workflows/ipa.yml) and download **Nudge-1.1.3-Unsigned** from **Artifacts**. Extract the ZIP to find the IPA. GitHub sign-in and repository access are required. Artifacts are time-limited.
 2. Sign and install the IPA with your preferred sideloading tool. This is an unsigned test build, not an App Store download.
 3. Open Nudge, allow notifications, and enable Lock Screen alerts and Sounds in iPhone Settings. Set your defaults and add your first reminder.
 
