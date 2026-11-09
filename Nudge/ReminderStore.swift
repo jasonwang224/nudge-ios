@@ -89,6 +89,18 @@ final class ReminderStore: ObservableObject {
         if !oldCards.isEmpty { center.removeDeliveredNotifications(withIdentifiers: oldCards) }
     }
 
+    func done(_ occurrence: ReminderOccurrence, now: Date = .now) async {
+        if !occurrence.isProjected {
+            await done(occurrence.reminder, now: now)
+            return
+        }
+        guard loadDatabase(),
+              let change = ReminderLifecycle.completingProjected(occurrence, in: snapshot, now: now) else { return }
+        // The future occurrence has no requests of its own. Leave the current
+        // occurrence and its queued alerts in place.
+        commit(change.snapshot, refreshAlerts: false)
+    }
+
     func restore(_ reminder: Reminder) {
         guard let change = ReminderLifecycle.restoring(reminder, in: snapshot) else { return }
         commit(change.snapshot, retiring: change.retiring,
@@ -174,7 +186,7 @@ final class ReminderStore: ObservableObject {
 
     @discardableResult
     private func commit(_ changed: ReminderSnapshot, retiring previous: Reminder? = nil,
-                        askPermission: Bool = false) -> String? {
+                        askPermission: Bool = false, refreshAlerts: Bool = true) -> String? {
         guard let source else { return storageIssue ?? "Open Nudge and wait for your reminders to finish loading." }
         let prepared = NagDelivery.prepare(changed, replacing: snapshot, now: .now)
         do {
@@ -188,7 +200,7 @@ final class ReminderStore: ObservableObject {
         verifiedEmpty = false
         storageIssue = nil
         if let previous { clearNotifications(for: previous) }
-        enqueueSync(askPermission: askPermission)
+        if refreshAlerts { enqueueSync(askPermission: askPermission) }
         return nil
     }
 
@@ -465,7 +477,7 @@ final class ReminderStore: ObservableObject {
         func mode(_ content: UNNotificationContent) -> String {
             NotificationRequestFactory.isSoundOnly(content) ? "sound-only" : "alert"
         }
-        var lines = ["Nudge 1.1.0 (12) · iOS \(UIDevice.current.systemVersion)",
+        var lines = ["Nudge 1.1.1 (13) · iOS \(UIDevice.current.systemVersion)",
                      "Captured: \(time(.now))", "Sound-only nags: \(soundOnlyEnabled ? "ON" : "OFF")",
                      "Pending API records: \(pending.count) · Delivered API records: \(delivered.count)",
                      "API records are not a count of visible Lock Screen cards. Check the screen directly.",

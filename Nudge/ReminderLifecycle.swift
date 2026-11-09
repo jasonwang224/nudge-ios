@@ -80,12 +80,19 @@ enum ReminderLifecycle {
         changed.stoppedNotificationGenerations = stopped
         changed.reminders[index].generation = nextGeneration
         changed.reminders[index].snoozedUntil = nil
+        let completedForDay = calendar.startOfDay(for: previous.alertDate) > calendar.startOfDay(for: now)
+            ? ReminderDay(previous.alertDate, calendar: calendar) : nil
         if let next {
             var occurrence = changed.reminders[index]
             occurrence.id = UUID()
             occurrence.completedAt = now
+            occurrence.completedForDay = completedForDay
+            occurrence.precompletedDays = nil
             changed.reminders[index].due = next
             changed.reminders[index].adjustedDue = nil
+            let nextDay = ReminderDay(next, calendar: calendar).date(in: calendar) ?? next
+            let remaining = previous.precompletedDays?.filter { ($0.date(in: calendar) ?? .distantPast) >= nextDay }
+            changed.reminders[index].precompletedDays = remaining?.isEmpty == false ? remaining : nil
             if let schedule = previous.phoneSchedule,
                var resolved = schedule.resolvingCalendar(relativeTo: previous.due, calendar: calendar),
                let recurrenceCalendar = resolved.resolvedCalendar(relativeTo: previous.due, calendar: calendar) {
@@ -96,8 +103,41 @@ enum ReminderLifecycle {
             changed.reminders.append(occurrence)
         } else {
             changed.reminders[index].completedAt = now
+            changed.reminders[index].completedForDay = completedForDay
         }
         return Change(snapshot: changed, retiring: previous)
+    }
+
+    static func completingProjected(_ occurrence: ReminderOccurrence, in snapshot: ReminderSnapshot, now: Date = .now,
+                                    calendar: Calendar = .autoupdatingCurrent) -> Change? {
+        guard occurrence.isProjected, let index = currentIndex(occurrence.reminder, in: snapshot) else { return nil }
+        let series = snapshot.reminders[index]
+        guard ReminderOccurrence.entries(reminders: [series], on: occurrence.date, now: now, calendar: calendar)
+            .contains(where: { $0.isProjected && $0.id == occurrence.id }) else { return nil }
+
+        let completedDay = ReminderDay(occurrence.date, calendar: calendar)
+        var changed = snapshot
+        var days = series.precompletedDays ?? []
+        days.insert(completedDay)
+        changed.reminders[index].precompletedDays = days
+
+        var history = series
+        history.id = UUID()
+        history.generation = UUID()
+        history.due = occurrence.date
+        history.adjustedDue = nil
+        history.snoozedUntil = nil
+        history.completedAt = now
+        history.completedForDay = completedDay
+        history.precompletedDays = nil
+        if var schedule = series.phoneSchedule?.resolvingCalendar(relativeTo: series.due, calendar: calendar),
+           let recurrenceCalendar = schedule.resolvedCalendar(relativeTo: series.due, calendar: calendar) {
+            schedule.day = recurrenceCalendar.dateComponents([.era, .year, .month, .day], from: occurrence.date)
+            schedule.prefersSecondOccurrence = nil
+            history.phoneSchedule = schedule
+        }
+        changed.reminders.append(history)
+        return Change(snapshot: changed, retiring: nil)
     }
 
     static func restoring(_ reminder: Reminder, in snapshot: ReminderSnapshot, now: Date = .now) -> Change? {
@@ -106,6 +146,7 @@ enum ReminderLifecycle {
         }) else { return nil }
         var restored = previous
         restored.completedAt = nil
+        restored.completedForDay = nil
         restored.snoozedUntil = nil
         // Undo restores the occurrence at its original time. An overdue one is
         // visible in Needs attention; its active recurring series stays separate.

@@ -17,6 +17,54 @@ let dailyDueComponents = calendar.dateComponents([.era, .year, .month, .day], fr
 daily.phoneSchedule?.day = dailyDueComponents
 let unrelated = Reminder(title: "Unrelated", notes: "Keep me", due: date(8, 18), repeatAnchor: date(8, 18), preferences: ReminderPreferences())
 let original = ReminderSnapshot(reminders: [daily, unrelated])
+let november9 = date(9, 8)
+let projectedNinth = ReminderOccurrence.entries(reminders: original.reminders, on: november9, now: now, calendar: calendar)
+    .first { $0.reminder.id == daily.id && $0.isProjected }!
+let markedNinth = ReminderLifecycle.completingProjected(projectedNinth, in: original, now: now, calendar: calendar)!
+let seriesWithNinthDone = current(markedNinth.snapshot, daily.id)
+precondition(markedNinth.retiring == nil && markedNinth.snapshot.stoppedNotificationGenerations == nil)
+precondition(seriesWithNinthDone.generation == daily.generation && seriesWithNinthDone.alertDate == daily.alertDate)
+precondition(current(markedNinth.snapshot, unrelated.id) == unrelated)
+precondition(ReminderLifecycle.completingProjected(projectedNinth, in: markedNinth.snapshot, now: now, calendar: calendar) == nil)
+precondition(ReminderLifecycle.completingProjected(ReminderOccurrence(daily, projectedDate: date(9, 7)),
+    in: original, now: now, calendar: calendar) == nil, "Done requires the actual occurrence shown for the selected date.")
+let ninthAgenda = AgendaPresentation(reminders: markedNinth.snapshot.reminders, todayOnly: true,
+    selectedDay: november9, now: now, calendar: calendar)
+precondition(ninthAgenda.visible.isEmpty && ninthAgenda.completed.count == 1)
+let ninthHistory = ninthAgenda.completed[0]
+precondition(ninthHistory.alertDate == november9 && ninthHistory.completedAt == now)
+precondition(AgendaPresentation(reminders: markedNinth.snapshot.reminders, todayOnly: true,
+    selectedDay: nil, now: now, calendar: calendar).completed.isEmpty)
+precondition(ReminderOccurrence.entries(reminders: [seriesWithNinthDone], on: date(10, 8), now: now,
+    calendar: calendar).first?.date == date(10, 8))
+let markedBytes = try JSONEncoder().encode(markedNinth.snapshot)
+let reloadedMarked = try JSONDecoder().decode(ReminderSnapshot.self, from: markedBytes).validated()
+precondition(reloadedMarked == markedNinth.snapshot)
+let seriesAfterSeventh = ReminderLifecycle.completing(seriesWithNinthDone, in: reloadedMarked, now: now, calendar: calendar)!
+let eighth = current(seriesAfterSeventh.snapshot, daily.id)
+precondition(eighth.alertDate == date(8, 8), "Completing the ninth ahead of time must preserve the eighth.")
+let seriesAfterEighth = ReminderLifecycle.completing(eighth, in: seriesAfterSeventh.snapshot, now: now, calendar: calendar)!
+let tenth = current(seriesAfterEighth.snapshot, daily.id)
+precondition(tenth.alertDate == date(10, 8) && tenth.precompletedDays == nil,
+             "The series must skip the completed ninth and keep its original time on the tenth.")
+precondition(AgendaPresentation(reminders: seriesAfterEighth.snapshot.reminders, todayOnly: true,
+    selectedDay: date(8, 8), now: now, calendar: calendar).completed.count == 1)
+let restoredNinth = ReminderLifecycle.restoring(ninthHistory, in: markedNinth.snapshot, now: now)!
+let restoredNinthReminder = current(restoredNinth.snapshot, ninthHistory.id)
+precondition(restoredNinthReminder.completedForDay == nil && restoredNinthReminder.alertDate == november9
+             && restoredNinthReminder.preferences.repeatRule == .never)
+precondition(restoredNinthReminder.phoneSchedule?.dueDate(calendar: calendar) == november9)
+precondition(current(restoredNinth.snapshot, daily.id) == seriesWithNinthDone)
+let futureOneOffDone = ReminderLifecycle.completing(unrelated, in: original, now: now, calendar: calendar)!
+precondition(AgendaPresentation(reminders: futureOneOffDone.snapshot.reminders, todayOnly: true,
+    selectedDay: unrelated.due, now: now, calendar: calendar).completed.map(\.id) == [unrelated.id])
+var weeklyWithDone = daily
+weeklyWithDone.preferences.repeatRule = .weekly
+weeklyWithDone.repeatAnchor = daily.due
+weeklyWithDone.phoneSchedule?.anchorDay = dailyDueComponents
+weeklyWithDone.precompletedDays = [ReminderDay(date(14, 8), calendar: calendar), ReminderDay(date(21, 8), calendar: calendar)]
+precondition(weeklyWithDone.nextOccurrence(after: now, calendar: calendar) == date(28, 8))
+
 precondition(AgendaPresentation.includesToday(daily, now: now, calendar: calendar))
 precondition(!AgendaPresentation.includesToday(unrelated, now: now, calendar: calendar))
 precondition(ReminderLifecycle.adjusting(daily, by: .fiveMinutes, direction: .earlier,

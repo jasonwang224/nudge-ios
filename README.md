@@ -51,7 +51,7 @@ The call you keep meaning to make. The plants waiting for water. A moment to ste
 
 **Need another nudge? Choose the pace.** Nag Me schedules follow-up notifications every **2, 5, 10, 15, 20, or 30 minutes**. Choose Off for a single alert. Queued reminders can arrive with Nudge closed; see the delivery notes below.
 
-**Keep your routines close.** Repeat daily, on weekdays, weekly, monthly, or on your own selection of weekdays. Complete the current reminder and Nudge schedules the next occurrence. Preview the days ahead in Today, or see your scheduled reminders in Upcoming.
+**Keep your routines close.** Repeat daily, on weekdays, weekly, monthly, or on your own selection of weekdays. Complete the current reminder and Nudge schedules the next occurrence. In Today, you can mark a future occurrence Done and still receive the rest of the series.
 
 **Move a reminder in a tap.** Tap a row and adjust its time by 5 minutes, 1 hour, or 1 day. The menu stays open so you can make more changes. Tap the row again to close it, or use its three dots to edit the reminder.
 
@@ -74,9 +74,9 @@ Tap the alert itself to open the reminder’s time menu.
 
 ## Get Nudge
 
-**Current test build: 1.1.0 (12).** Built for iOS 17.4 and later, with testing centered on the iPhone 11 Pro running iOS 17.4.1.
+**Current test build: 1.1.1 (13).** Built for iOS 17.4 and later, with testing centered on the iPhone 11 Pro running iOS 17.4.1.
 
-1. Open the latest successful run in [Build Nudge IPA](https://github.com/jasonwang224/nudge-ios/actions/workflows/ipa.yml) and download **Nudge-1.1.0-Unsigned** from **Artifacts**. Extract the ZIP to find the IPA. GitHub sign-in and repository access are required. Artifacts are time-limited.
+1. Open the latest successful run in [Build Nudge IPA](https://github.com/jasonwang224/nudge-ios/actions/workflows/ipa.yml) and download **Nudge-1.1.1-Unsigned** from **Artifacts**. Extract the ZIP to find the IPA. GitHub sign-in and repository access are required. Artifacts are time-limited.
 2. Sign and install the IPA with your preferred sideloading tool. This is an unsigned test build, not an App Store download.
 3. Open Nudge, allow notifications, and enable Lock Screen alerts and Sounds in iPhone Settings. Set your defaults and add your first reminder.
 

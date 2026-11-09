@@ -133,6 +133,26 @@ struct PhoneSchedule: Codable, Equatable {
     }
 }
 
+// Use a local civil date so a completed day survives changes to the clock,
+// time zone, or the iPhone's display calendar.
+struct ReminderDay: Codable, Hashable {
+    private let components: DateComponents
+
+    init(_ date: Date, calendar: Calendar) {
+        components = Self.localGregorian(calendar).dateComponents([.era, .year, .month, .day], from: date)
+    }
+
+    func date(in calendar: Calendar) -> Date? {
+        Self.localGregorian(calendar).date(from: components)
+    }
+
+    private static func localGregorian(_ calendar: Calendar) -> Calendar {
+        var gregorian = Calendar(identifier: .gregorian)
+        gregorian.timeZone = calendar.timeZone
+        return gregorian
+    }
+}
+
 struct Reminder: Codable, Identifiable, Equatable {
     var id = UUID()
     var generation = UUID()
@@ -145,6 +165,8 @@ struct Reminder: Codable, Identifiable, Equatable {
     var adjustedDue: Date?
     var snoozedUntil: Date?
     var completedAt: Date?
+    var completedForDay: ReminderDay?
+    var precompletedDays: Set<ReminderDay>?
     // Optional for backward compatibility. Legacy generations keep visible nags.
     var soundOnlyAfterIndex: Int?
     var soundOnlyAnchorAccepted: Bool?
@@ -177,29 +199,33 @@ struct Reminder: Codable, Identifiable, Equatable {
         let cutoffDay = calendar.startOfDay(for: cutoff)
         let elapsedDays = calendar.dateComponents([.day], from: anchorDay, to: cutoffDay).day ?? 0
         let clock = calendar.dateComponents([.hour, .minute, .second], from: repeatAnchor)
+        let skipped = precompletedDays ?? []
+        func shouldSchedule(_ candidate: Date) -> Bool {
+            candidate > cutoff && (skipped.isEmpty || !skipped.contains(ReminderDay(candidate, calendar: calendar)))
+        }
 
         if rule == .monthly {
             guard let startMonth = calendar.dateInterval(of: .month, for: anchor)?.start,
                   let cutoffMonth = calendar.dateInterval(of: .month, for: cutoff)?.start else { return nil }
             let elapsedMonths = calendar.dateComponents([.month], from: startMonth, to: cutoffMonth).month ?? 0
             let originalDay = calendar.component(.day, from: anchor)
-            for offset in max(0, elapsedMonths)...(max(0, elapsedMonths) + 1) {
+            for offset in max(0, elapsedMonths)...(max(0, elapsedMonths) + 1 + skipped.count) {
                 guard let month = calendar.date(byAdding: .month, value: offset, to: startMonth),
                       let days = calendar.range(of: .day, in: .month, for: month),
                       let day = calendar.date(byAdding: .day, value: min(originalDay, days.count) - 1, to: month),
                       let candidate = atTime(clock, on: day, calendar: calendar) else { continue }
-                if candidate > cutoff { return candidate }
+                if shouldSchedule(candidate) { return candidate }
             }
             return nil
         }
 
-        for offset in max(0, elapsedDays)...(max(0, elapsedDays) + 7) {
+        for offset in max(0, elapsedDays)...(max(0, elapsedDays) + 7 * (1 + skipped.count)) {
             if rule == .weekly && offset % 7 != 0 { continue }
             guard let day = calendar.date(byAdding: .day, value: offset, to: anchorDay) else { continue }
             let weekday = calendar.component(.weekday, from: day)
             if rule == .weekdays && (weekday == 1 || weekday == 7) { continue }
             if rule == .custom && !preferences.weekdays.contains(weekday) { continue }
-            if let candidate = atTime(clock, on: day, calendar: calendar), candidate > cutoff {
+            if let candidate = atTime(clock, on: day, calendar: calendar), shouldSchedule(candidate) {
                 return candidate
             }
         }
@@ -371,7 +397,7 @@ struct ReminderOccurrence: Identifiable {
         isProjected = false
     }
 
-    private init(_ reminder: Reminder, projectedDate: Date) {
+    init(_ reminder: Reminder, projectedDate: Date) {
         self.reminder = reminder
         date = projectedDate
         isProjected = true

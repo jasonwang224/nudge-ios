@@ -60,9 +60,14 @@ struct AgendaPresentation {
         viewedDay = day
         isToday = calendar.isDate(day, inSameDayAs: today)
         active = reminders.filter { $0.completedAt == nil }
+        let viewedCompletionDay = ReminderDay(day, calendar: calendar)
         completed = reminders.filter {
             guard let completedAt = $0.completedAt else { return false }
-            return !todayOnly || calendar.isDate(completedAt, inSameDayAs: day)
+            if !todayOnly { return true }
+            if let completedForDay = $0.completedForDay {
+                return completedForDay == viewedCompletionDay
+            }
+            return calendar.isDate(completedAt, inSameDayAs: day)
         }.sorted {
             if $0.completedAt == $1.completedAt { return $0.id.uuidString < $1.id.uuidString }
             return ($0.completedAt ?? .distantPast) > ($1.completedAt ?? .distantPast)
