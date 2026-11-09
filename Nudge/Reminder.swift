@@ -6,6 +6,7 @@ enum RepeatRule: String, Codable, CaseIterable, Identifiable {
     case weekdays = "Weekdays"
     case weekly = "Weekly"
     case monthly = "Monthly"
+    case yearly = "Yearly"
     case custom = "Custom"
 
     var id: String { rawValue }
@@ -204,13 +205,19 @@ struct Reminder: Codable, Identifiable, Equatable {
             candidate > cutoff && (skipped.isEmpty || !skipped.contains(ReminderDay(candidate, calendar: calendar)))
         }
 
-        if rule == .monthly {
-            guard let startMonth = calendar.dateInterval(of: .month, for: anchor)?.start,
-                  let cutoffMonth = calendar.dateInterval(of: .month, for: cutoff)?.start else { return nil }
-            let elapsedMonths = calendar.dateComponents([.month], from: startMonth, to: cutoffMonth).month ?? 0
+        if rule == .monthly || rule == .yearly {
+            let unit: Calendar.Component = rule == .yearly ? .year : .month
+            guard let anchorMonth = calendar.dateInterval(of: .month, for: anchor)?.start,
+                  let anchorPeriod = calendar.dateInterval(of: unit, for: anchor)?.start,
+                  let cutoffPeriod = calendar.dateInterval(of: unit, for: cutoff)?.start else { return nil }
+            let elapsed = calendar.dateComponents([unit], from: anchorPeriod, to: cutoffPeriod).value(for: unit) ?? 0
+            let firstOffset = max(0, elapsed)
             let originalDay = calendar.component(.day, from: anchor)
-            for offset in max(0, elapsedMonths)...(max(0, elapsedMonths) + 1 + skipped.count) {
-                guard let month = calendar.date(byAdding: .month, value: offset, to: startMonth),
+            // Start each search from the original month so a clamped date does
+            // not change the anchor when the next period has more days.
+            for offset in firstOffset...(firstOffset + 1 + skipped.count) {
+                guard let shiftedMonth = calendar.date(byAdding: unit, value: offset, to: anchorMonth),
+                      let month = calendar.dateInterval(of: .month, for: shiftedMonth)?.start,
                       let days = calendar.range(of: .day, in: .month, for: month),
                       let day = calendar.date(byAdding: .day, value: min(originalDay, days.count) - 1, to: month),
                       let candidate = atTime(clock, on: day, calendar: calendar) else { continue }

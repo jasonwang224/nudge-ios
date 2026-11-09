@@ -88,6 +88,31 @@ monthEnd.storedCalendar = nil
 let monthly = reminder(monthEnd, due: february28, rule: .monthly)
 precondition(monthly.nextOccurrence(after: february28, calendar: calendar(.buddhist)) == date(2027, 3, 31, 9, 30))
 
+// A leap-day anniversary clamps in common years and returns to February 29.
+let leapDay = date(2024, 2, 29, 9, 30)
+let anniversary = reminder(PhoneSchedule(day: leapDay, hour: 9, minute: 30, calendar: gregorian),
+                           due: leapDay, rule: .yearly)
+var annualSnapshot = ReminderSnapshot(reminders: [anniversary])
+for year in 2025...2028 {
+    let active = annualSnapshot.reminders.first { $0.completedAt == nil }!
+    let finished = ReminderLifecycle.completing(active, in: annualSnapshot, now: active.due,
+                                                 calendar: calendar(.buddhist))!
+    annualSnapshot = finished.snapshot
+    let nextAnniversary = annualSnapshot.reminders.first { $0.completedAt == nil }!
+    precondition(nextAnniversary.due == date(year, 2, year == 2028 ? 29 : 28, 9, 30))
+    precondition(nextAnniversary.phoneSchedule?.anchorDay == anniversary.phoneSchedule?.anchorDay)
+}
+let nextFebruary = date(2025, 2, 28, 9, 30)
+let preview = ReminderOccurrence.entries(reminders: [anniversary], on: nextFebruary,
+                                         now: date(2025, 2, 27), calendar: gregorian)
+precondition(preview.first?.isProjected == true && preview.first?.date == nextFebruary)
+let marked = ReminderLifecycle.completingProjected(preview[0], in: ReminderSnapshot(reminders: [anniversary]),
+                                                   now: date(2025, 2, 27), calendar: gregorian)!
+precondition(marked.snapshot.reminders.first?.nextOccurrence(after: leapDay, calendar: gregorian)
+             == date(2026, 2, 28, 9, 30))
+let newYorkAnniversary = gregorianNewYork.date(from: DateComponents(year: 2025, month: 2, day: 28, hour: 9, minute: 30))!
+precondition(anniversary.nextOccurrence(after: leapDay, calendar: newYork) == newYorkAnniversary)
+
 // Legacy chronologies outside the verified migration set require confirmation.
 // Keep absolute data intact and do not silently terminate a series.
 var ambiguous = PhoneSchedule(day: original, hour: 8, minute: 30, calendar: calendar(.islamicCivil))
@@ -121,4 +146,4 @@ precondition(next.due == date(2027, 11, 8, 1, 30))
 precondition(next.phoneSchedule?.prefersSecondOccurrence != true)
 precondition(history.phoneSchedule?.dueDate(calendar: gregorian) == last)
 
-print("Calendar identity, safe legacy migration, timezone following, month-end preservation, ambiguous-data safety, and repeated-hour checks passed.")
+print("Calendar identity, safe legacy migration, timezone following, month-end and yearly recurrence, ambiguous-data safety, and repeated-hour checks passed.")
