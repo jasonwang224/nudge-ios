@@ -46,7 +46,9 @@ for rule in RepeatRule.allCases {
         }
     }
 }
-precondition(combinations == 588 && !NagDelivery.enabled)
+precondition(combinations == 686 && !NagDelivery.enabled)
+precondition(AlertSound(rawValue: "Glass")?.fileName == "Glass.wav")
+precondition(AlertSound(rawValue: "Digital Glass")?.fileName == "DigitalGlass.wav")
 
 var preferences = ReminderPreferences()
 preferences.nagMinutes = 2

@@ -15,6 +15,7 @@ enum RepeatRule: String, Codable, CaseIterable, Identifiable {
 enum AlertSound: String, Codable, CaseIterable, Identifiable {
     case system = "iPhone default"
     case glass = "Glass"
+    case digitalGlass = "Digital Glass"
     case droplet = "Droplet"
     case chime = "Chime"
     case digitalChime = "Digital Chime"
@@ -25,6 +26,7 @@ enum AlertSound: String, Codable, CaseIterable, Identifiable {
     var fileName: String? {
         switch self {
         case .glass, .droplet, .chime: return rawValue + ".wav"
+        case .digitalGlass: return "DigitalGlass.wav"
         case .digitalChime: return "DigitalChime.wav"
         case .system, .silent: return nil
         }

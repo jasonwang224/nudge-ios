@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import UIKit
 
@@ -5,12 +6,17 @@ import UIKit
 struct NudgeHome: View {
     @ObservedObject var store: ReminderStore
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("Nudge.appearance") private var appearance: NudgeAppearance = .system
     @State private var editor: EditorItem?
     @State private var pendingCompletion: ReminderOccurrence?
     @State private var tab: Tab = .today
     @State private var notificationRequest: ReminderNotificationOpen?
     @State private var notificationDestination: Tab?
+
+    private var reminderAnimation: Animation? {
+        reduceMotion ? nil : .easeInOut(duration: 0.36)
+    }
 
     private enum Tab: Hashable {
         case today, upcoming, settings
@@ -58,7 +64,7 @@ struct NudgeHome: View {
             set: { if !$0 { pendingCompletion = nil } }
         ), presenting: pendingCompletion) { occurrence in
             Button("Cancel", role: .cancel) {}
-            Button("Done") { Task { await store.done(occurrence) } }
+            Button("Done") { Task { await store.done(occurrence, animation: reminderAnimation) } }
         } message: { occurrence in
             Text("\(occurrence.reminder.title)\n\(occurrence.date.formatted(date: .abbreviated, time: .shortened))")
         }
@@ -78,6 +84,7 @@ struct NudgeHome: View {
     private func agenda(todayOnly: Bool, palette: NudgePalette) -> some View {
         let destination: Tab = todayOnly ? .today : .upcoming
         return NudgeAgenda(store: store, todayOnly: todayOnly, palette: palette,
+                    reminderAnimation: reminderAnimation,
                     notificationRequest: tab == destination && notificationDestination == destination ? notificationRequest : nil,
                     didOpenNotification: { request in
                         if notificationRequest == request { notificationRequest = nil }
@@ -95,13 +102,15 @@ private struct NudgeAgenda: View {
     @ObservedObject var store: ReminderStore
     let todayOnly: Bool
     let palette: NudgePalette
+    let reminderAnimation: Animation?
     let notificationRequest: ReminderNotificationOpen?
     let didOpenNotification: (ReminderNotificationOpen) -> Void
     let newReminder: (Date?) -> Void
     let editReminder: (Reminder) -> Void
     let confirmCompletion: (ReminderOccurrence) -> Void
     @Environment(\.openURL) private var openURL
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var now = Date.now
     @State private var selectedDay: Date?
     @State private var showCompleted = false
     @State private var pendingDelete: Reminder?
@@ -115,9 +124,7 @@ private struct NudgeAgenda: View {
         var generation: UUID
     }
 
-    private var reminderAnimation: Animation? {
-        reduceMotion ? nil : .easeInOut(duration: 0.25)
-    }
+    private static let clock = Timer.publish(every: 15, on: .main, in: .common).autoconnect()
 
     private var quickTimeTransition: AnyTransition {
         .offset(y: -8).combined(with: .opacity)
@@ -125,17 +132,19 @@ private struct NudgeAgenda: View {
 
     var body: some View {
         ScrollViewReader { proxy in
-            TimelineView(.periodic(from: .now, by: 15)) { context in
-                agenda(at: context.date)
-            }
-            .onChange(of: scrollRequest, initial: true) { _, request in
-                guard let request, let id = expandedTime?.id else { return }
-                Task { @MainActor in
-                    await Task.yield()
-                    guard scrollRequest == request, expandedTime?.id == id else { return }
-                    withAnimation(reminderAnimation) { proxy.scrollTo(id, anchor: .center) }
+            agenda(at: now)
+                .onChange(of: scrollRequest, initial: true) { _, request in
+                    guard let request, let id = expandedTime?.id else { return }
+                    Task { @MainActor in
+                        await Task.yield()
+                        guard scrollRequest == request, expandedTime?.id == id else { return }
+                        withAnimation(reminderAnimation) { proxy.scrollTo(id, anchor: .center) }
+                    }
                 }
-            }
+        }
+        .onReceive(Self.clock) { now = $0 }
+        .onChange(of: scenePhase, initial: true) { _, phase in
+            if phase == .active { now = .now }
         }
         .onChange(of: notificationRequest, initial: true) { _, request in
             guard let request else { return }
@@ -181,7 +190,6 @@ private struct NudgeAgenda: View {
         let due = presentation.due
         let snoozed = presentation.snoozed
         let upcoming = presentation.upcoming
-        let completedIDs = Set(store.reminders.lazy.filter { $0.completedAt != nil }.map(\.id))
 
         return ScrollView {
             VStack(alignment: .leading, spacing: 20) {
@@ -233,7 +241,7 @@ private struct NudgeAgenda: View {
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 16)
-            .animation(reminderAnimation, value: completedIDs)
+            .animation(reminderAnimation, value: expandedTime?.id)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             Button { newReminder(todayOnly ? viewedDay : nil) } label: {
@@ -446,17 +454,13 @@ private struct NudgeAgenda: View {
     private func openTime(_ occurrence: ReminderOccurrence) {
         let reminder = occurrence.reminder
         let placement = occurrence.isProjected || reminder.completedAt != nil ? nil : reminder
-        withAnimation(reminderAnimation) {
-            expandedTime = ExpandedTime(id: occurrence.id, placement: placement, generation: reminder.generation)
-            adjustmentIssue = nil
-        }
+        expandedTime = ExpandedTime(id: occurrence.id, placement: placement, generation: reminder.generation)
+        adjustmentIssue = nil
     }
 
     private func closeTime() {
-        withAnimation(reminderAnimation) {
-            expandedTime = nil
-            adjustmentIssue = nil
-        }
+        expandedTime = nil
+        adjustmentIssue = nil
     }
 
     private func quickTimeMenu(_ occurrence: ReminderOccurrence, now: Date) -> some View {

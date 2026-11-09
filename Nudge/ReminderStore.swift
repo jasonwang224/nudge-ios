@@ -61,7 +61,7 @@ final class ReminderStore: ObservableObject {
         commit(change.snapshot, retiring: change.retiring)
     }
 
-    func done(_ reminder: Reminder, now: Date = .now) async {
+    func done(_ reminder: Reminder, now: Date = .now, animation: Animation? = nil) async {
         // An unsuccessful earlier edit can leave an older generation scheduled.
         // Settle in-flight adds, then include every observed generation belonging
         // to this reminder in the same durable completion transaction.
@@ -80,7 +80,7 @@ final class ReminderStore: ObservableObject {
             status = message
             return
         }
-        guard commit(change.snapshot, retiring: change.retiring) == nil else { return }
+        guard commit(change.snapshot, retiring: change.retiring, animation: animation) == nil else { return }
         let oldCards = delivered.compactMap { item -> String? in
             guard let request = PendingNudge(item.request.identifier), request.id == reminder.id,
                   observed.contains(request.generationIdentifier) else { return nil }
@@ -89,16 +89,16 @@ final class ReminderStore: ObservableObject {
         if !oldCards.isEmpty { center.removeDeliveredNotifications(withIdentifiers: oldCards) }
     }
 
-    func done(_ occurrence: ReminderOccurrence, now: Date = .now) async {
+    func done(_ occurrence: ReminderOccurrence, now: Date = .now, animation: Animation? = nil) async {
         if !occurrence.isProjected {
-            await done(occurrence.reminder, now: now)
+            await done(occurrence.reminder, now: now, animation: animation)
             return
         }
         guard loadDatabase(),
               let change = ReminderLifecycle.completingProjected(occurrence, in: snapshot, now: now) else { return }
         // The future occurrence has no requests of its own. Leave the current
         // occurrence and its queued alerts in place.
-        commit(change.snapshot, refreshAlerts: false)
+        commit(change.snapshot, refreshAlerts: false, animation: animation)
     }
 
     func restore(_ reminder: Reminder) {
@@ -186,7 +186,8 @@ final class ReminderStore: ObservableObject {
 
     @discardableResult
     private func commit(_ changed: ReminderSnapshot, retiring previous: Reminder? = nil,
-                        askPermission: Bool = false, refreshAlerts: Bool = true) -> String? {
+                        askPermission: Bool = false, refreshAlerts: Bool = true,
+                        animation: Animation? = nil) -> String? {
         guard let source else { return storageIssue ?? "Open Nudge and wait for your reminders to finish loading." }
         let prepared = NagDelivery.prepare(changed, replacing: snapshot, now: .now)
         do {
@@ -196,7 +197,11 @@ final class ReminderStore: ObservableObject {
             return storageIssue
         }
         snapshot = prepared
-        reminders = prepared.reminders
+        if let animation {
+            withAnimation(animation) { reminders = prepared.reminders }
+        } else {
+            reminders = prepared.reminders
+        }
         verifiedEmpty = false
         storageIssue = nil
         if let previous { clearNotifications(for: previous) }
@@ -477,7 +482,7 @@ final class ReminderStore: ObservableObject {
         func mode(_ content: UNNotificationContent) -> String {
             NotificationRequestFactory.isSoundOnly(content) ? "sound-only" : "alert"
         }
-        var lines = ["Nudge 1.1.4 (16) · iOS \(UIDevice.current.systemVersion)",
+        var lines = ["Nudge 1.1.5 (17) · iOS \(UIDevice.current.systemVersion)",
                      "Captured: \(time(.now))", "Sound-only nags: \(soundOnlyEnabled ? "ON" : "OFF")",
                      "Pending API records: \(pending.count) · Delivered API records: \(delivered.count)",
                      "API records are not a count of visible Lock Screen cards. Check the screen directly.",
