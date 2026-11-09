@@ -235,6 +235,14 @@ func checkSoundOnlyRequests() {
     let replacement = NotificationRequestFactory.make(for: legacyPlan.alerts[0], soundOnlyEnabled: true, now: now)
     precondition(!NotificationRequestFactory.needsRewrite(replacement, for: legacyPlan.alerts[0], enabled: true))
     precondition(replacement.content.userInfo["nudgeExpiryRequestedAt"] == nil)
+    precondition(replacement.content.body.isEmpty && replacement.content.categoryIdentifier == NotificationRequestFactory.category,
+                 "Reminders without notes should show the title and keep their actions.")
+    let instructionalContent = replacement.content.mutableCopy() as! UNMutableNotificationContent
+    instructionalContent.body = "Hold for Done or Snooze 15 min."
+    let instructionalRequest = UNNotificationRequest(identifier: replacement.identifier, content: instructionalContent,
+                                                     trigger: replacement.trigger)
+    precondition(NotificationRequestFactory.needsRewrite(instructionalRequest, for: legacyPlan.alerts[0], enabled: true),
+                 "A queued alert with the old instructions should be rewritten in place.")
     print("Sound-only request content, intervals, Silent fallback, and mode rewrite checks passed.")
 }
 

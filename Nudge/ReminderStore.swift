@@ -16,7 +16,6 @@ final class ReminderStore: ObservableObject {
     }
     @Published private(set) var status = "Checking notification access…"
     @Published private(set) var needsSettings = false
-    @Published private(set) var isScheduling = false
     @Published private(set) var storageIssue: String?
     @Published private(set) var schedulingIssue: String?
     @Published private(set) var soundOnlyEnabled = NagDelivery.enabled
@@ -53,25 +52,6 @@ final class ReminderStore: ObservableObject {
             return problem.rawValue
         } catch {
             return "Nudge couldn’t prepare this change. Your reminder was kept."
-        }
-    }
-
-    func scheduleTest(nagMinutes: Int = 2) {
-        guard [2, 5].contains(nagMinutes) else { return }
-        enqueueSync(askPermission: true)
-        Task {
-            await waitForCurrentSync()
-            let settings = await center.notificationSettings()
-            guard settings.authorizationStatus == .authorized, settings.lockScreenSetting == .enabled else { return }
-            let due = Date().addingTimeInterval(30)
-            var preferences = defaults
-            preferences.notifications = true
-            preferences.nagMinutes = nagMinutes
-            preferences.repeatRule = .never
-            preferences.sound = .chime
-            let title = "Lock Screen test · \(nagMinutes) min"
-            save(Reminder(title: title, notes: "Hold this notification to try Snooze 15 min or Done.",
-                          due: due, repeatAnchor: due, preferences: preferences))
         }
     }
 
@@ -221,13 +201,11 @@ final class ReminderStore: ObservableObject {
         let prior = syncTask
         syncRevision += 1
         let revision = syncRevision
-        isScheduling = true
         schedulingIssue = nil
         syncTask = Task { [weak self] in
             await prior?.value
             guard let self else { return }
             await self.reconcile(revision: revision)
-            if revision == self.syncRevision { self.isScheduling = false }
         }
     }
 

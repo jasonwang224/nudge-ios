@@ -23,6 +23,12 @@ enum ReminderEditorDraft {
         calendar.date(byAdding: .day, value: days, to: calendar.startOfDay(for: now))
     }
 
+    static func formattedTime(_ time: String) -> String? {
+        guard let clock = clock(time: time, isPM: false) else { return nil }
+        let hour = clock.hour == 0 ? 12 : clock.hour
+        return String(format: "%d:%02d", hour, clock.minute)
+    }
+
     static func schedule(time: String, day: Date, isPM: Bool, original: Reminder? = nil, now: Date = .now,
                          calendar: Calendar = .autoupdatingCurrent) -> PhoneSchedule? {
         try? preparedSchedule(time: time, day: day, isPM: isPM, original: original, now: now, calendar: calendar).schedule

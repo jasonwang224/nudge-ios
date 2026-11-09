@@ -68,7 +68,6 @@ The call you keep meaning to make. The plants waiting for water. A moment to ste
 | **Time that follows your phone** | Schedules use your iPhone's local time zone and handle daylight-saving transitions. Snooze and nags count elapsed minutes. |
 | **Familiar sound and vibration controls** | Notification vibration follows your iPhone's native settings. |
 | **Your reminders stay with you** | Local storage and local iOS notifications. No Nudge account or remote reminder service required. |
-| **An easy first check** | Send a test alert from Settings, then try Done and Snooze with the app closed and the screen off. |
 
 ## Get Nudge
 

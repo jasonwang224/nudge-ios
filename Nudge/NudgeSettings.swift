@@ -1,12 +1,10 @@
 import SwiftUI
-import UIKit
 
 @MainActor
 struct NudgeSettings: View {
     @ObservedObject var store: ReminderStore
     @Binding var appearance: NudgeAppearance
     let palette: NudgePalette
-    @Environment(\.openURL) private var openURL
 
     var body: some View {
         ScrollView {
@@ -31,42 +29,11 @@ struct NudgeSettings: View {
                     }.pickerStyle(.segmented)
                 }
                 .padding(15).nudgePanel(palette)
-                notificationCard
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 16)
         }
         .foregroundStyle(palette.ink)
         .background(palette.paper.ignoresSafeArea())
-    }
-
-    private var notificationCard: some View {
-        VStack(alignment: .leading, spacing: 13) {
-            Label("LOCK SCREEN", systemImage: "lock")
-                .font(.caption.weight(.semibold)).tracking(0.8)
-            if store.isScheduling {
-                HStack {
-                    ProgressView()
-                    Text("Scheduling with iOS…").font(.footnote)
-                }
-            } else {
-                Text(store.status).font(.footnote).foregroundStyle(palette.secondary)
-            }
-            if store.needsSettings {
-                Button("Open iPhone notification settings") {
-                    if let url = URL(string: UIApplication.openNotificationSettingsURLString) { openURL(url) }
-                }
-                .frame(minHeight: 44, alignment: .leading)
-            } else {
-                Button("Send a test alert in 30 seconds") { store.scheduleTest() }
-                    .disabled(store.isScheduling)
-                    .frame(minHeight: 44, alignment: .leading)
-                Text("The test adds a reminder that nudges every 2 minutes. Wait for the queue confirmation before locking your iPhone.")
-                    .font(.footnote).foregroundStyle(palette.secondary)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(15)
-        .nudgePanel(palette)
     }
 }

@@ -10,7 +10,7 @@ enum NotificationRequestFactory {
         let content = UNMutableNotificationContent()
         if !soundOnly {
             content.title = reminder.title
-            content.body = reminder.notes.isEmpty ? "Hold for Done or Snooze 15 min." : reminder.notes
+            content.body = reminder.notes
             content.categoryIdentifier = category
             content.threadIdentifier = reminder.id.uuidString
         }
@@ -62,8 +62,10 @@ enum NotificationRequestFactory {
             guard let next = calendarTrigger.nextTriggerDate(),
                   abs(next.timeIntervalSince(alert.date)) < 1 else { return true }
         }
+        let soundOnly = isSoundOnly(request.content)
         return request.content.userInfo[NagDelivery.versionKey] as? Int != NagDelivery.payloadVersion
-            || isSoundOnly(request.content) != NagDelivery.isSoundOnly(alert, enabled: enabled)
+            || soundOnly != NagDelivery.isSoundOnly(alert, enabled: enabled)
+            || (!soundOnly && request.content.body != alert.reminder.notes)
     }
 
     private static func intervalTrigger(for date: Date, now: Date) -> UNTimeIntervalNotificationTrigger {

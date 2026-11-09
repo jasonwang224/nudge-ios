@@ -90,7 +90,10 @@ struct ReminderEditor: View {
                 ToolbarItemGroup(placement: .keyboard) {
                     if timeFocused {
                         Spacer()
-                        Button("Done") { timeFocused = false }
+                        Button("Done") {
+                            time = ReminderEditorDraft.formattedTime(time) ?? time
+                            timeFocused = false
+                        }
                     }
                 }
             }

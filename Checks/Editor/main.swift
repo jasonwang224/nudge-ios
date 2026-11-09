@@ -44,6 +44,11 @@ for input in ["", " ", "0", "00", "13", "1360", "860", "8:60", "8:", ":30", "8::
            "Malformed time was accepted: \(input)")
 }
 expectProblem(.emptyTitle, "blank title") { try draft(title: " \n ") }
+for (input, formatted) in [("300", "3:00"), ("905", "9:05"), ("1200", "12:00"), ("3:00", "3:00")] {
+    expect(ReminderEditorDraft.formattedTime(input) == formatted, "Keypad Done did not format \(input)")
+}
+expect(ReminderEditorDraft.formattedTime("") == nil, "Keypad Done should leave blank input alone")
+expect(ReminderEditorDraft.formattedTime("360") == nil, "Keypad Done should leave invalid input alone")
 expectProblem(.emptyTime, "blank time") { try draft(time: " ") }
 expectProblem(.invalidTime, "invalid minute") { try draft(time: "1260") }
 expectProblem(.pastDate, "new past date") { try draft(day: date(2026, 11, 7)) }
