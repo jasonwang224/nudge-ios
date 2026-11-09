@@ -11,6 +11,7 @@ final class ReminderStore: ObservableObject {
     static let snoozeAction = "NUDGE_SNOOZE"
 
     @Published private(set) var reminders: [Reminder] = []
+    @Published private(set) var notificationOpen: ReminderNotificationOpen?
     @Published var defaults: ReminderPreferences {
         didSet { persist(defaults, key: Self.defaultsKey) }
     }
@@ -99,10 +100,26 @@ final class ReminderStore: ObservableObject {
         commit(change.snapshot, retiring: change.retiring)
     }
 
+    func adjustTime(_ reminder: Reminder, by shift: ReminderTimeShift, direction: ReminderTimeShift.Direction,
+                    now: Date = .now) -> String? {
+        guard loadDatabase() else { return storageIssue ?? Self.storageUnavailable }
+        guard currentIndex(reminder.id, generation: reminder.generation) != nil else {
+            return ReminderLifecycle.Problem.changed.rawValue
+        }
+        guard let change = ReminderLifecycle.adjusting(reminder, by: shift, direction: direction,
+                                                      in: snapshot, now: now) else {
+            return "Choose a time in the future."
+        }
+        return commit(change.snapshot, retiring: change.retiring)
+    }
+
     func handleAction(_ action: String, id: String, generation: String, at time: Date) async {
         guard loadDatabase(), let id = UUID(uuidString: id), let generation = UUID(uuidString: generation),
               let index = currentIndex(id, generation: generation) else { return }
         switch action {
+        case UNNotificationDefaultActionIdentifier:
+            notificationOpen = ReminderNotificationOpen(id: id, generation: generation)
+            return
         case Self.doneAction: await done(reminders[index], now: time)
         case Self.snoozeAction: snooze(reminders[index], now: time)
         default: return
@@ -448,7 +465,7 @@ final class ReminderStore: ObservableObject {
         func mode(_ content: UNNotificationContent) -> String {
             NotificationRequestFactory.isSoundOnly(content) ? "sound-only" : "alert"
         }
-        var lines = ["Nudge 1.0.9 (11) · iOS \(UIDevice.current.systemVersion)",
+        var lines = ["Nudge 1.1.0 (12) · iOS \(UIDevice.current.systemVersion)",
                      "Captured: \(time(.now))", "Sound-only nags: \(soundOnlyEnabled ? "ON" : "OFF")",
                      "Pending API records: \(pending.count) · Delivered API records: \(delivered.count)",
                      "API records are not a count of visible Lock Screen cards. Check the screen directly.",

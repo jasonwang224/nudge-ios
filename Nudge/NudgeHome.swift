@@ -7,6 +7,13 @@ struct NudgeHome: View {
     @Environment(\.colorScheme) private var scheme
     @AppStorage("Nudge.appearance") private var appearance: NudgeAppearance = .system
     @State private var editor: EditorItem?
+    @State private var tab: Tab = .today
+    @State private var notificationRequest: ReminderNotificationOpen?
+    @State private var notificationDestination: Tab?
+
+    private enum Tab: Hashable {
+        case today, upcoming, settings
+    }
 
     private struct EditorItem: Identifiable {
         var id = UUID()
@@ -16,15 +23,18 @@ struct NudgeHome: View {
 
     var body: some View {
         let palette = NudgePalette(scheme: scheme)
-        TabView {
+        TabView(selection: $tab) {
             agenda(todayOnly: true, palette: palette)
                 .tabItem { Label("Today", systemImage: "sun.max") }
+                .tag(Tab.today)
             agenda(todayOnly: false, palette: palette)
                 .tabItem { Label("Upcoming", systemImage: "calendar") }
+                .tag(Tab.upcoming)
             NudgeSettings(store: store, appearance: $appearance, palette: palette)
                 .toolbarBackground(palette.paper, for: .tabBar)
                 .toolbarBackground(.visible, for: .tabBar)
                 .tabItem { Label("Settings", systemImage: "gearshape") }
+                .tag(Tab.settings)
         }
         .tint(palette.accent)
         .preferredColorScheme(appearance.scheme)
@@ -42,10 +52,25 @@ struct NudgeHome: View {
             ReminderEditor(store: store, reminder: item.reminder, initialDay: item.initialDay)
                 .tint(palette.accent)
         }
+        .onChange(of: store.notificationOpen, initial: true) { _, request in
+            guard let request, let reminder = store.reminders.first(where: {
+                $0.id == request.id && $0.generation == request.generation && $0.completedAt == nil
+            }) else { return }
+            let destination: Tab = AgendaPresentation.includesToday(reminder) ? .today : .upcoming
+            editor = nil
+            notificationDestination = destination
+            notificationRequest = request
+            tab = destination
+        }
     }
 
     private func agenda(todayOnly: Bool, palette: NudgePalette) -> some View {
-        NudgeAgenda(store: store, todayOnly: todayOnly, palette: palette,
+        let destination: Tab = todayOnly ? .today : .upcoming
+        return NudgeAgenda(store: store, todayOnly: todayOnly, palette: palette,
+                    notificationRequest: tab == destination && notificationDestination == destination ? notificationRequest : nil,
+                    didOpenNotification: { request in
+                        if notificationRequest == request { notificationRequest = nil }
+                    },
                     newReminder: { editor = EditorItem(initialDay: $0) },
                     editReminder: { editor = EditorItem(reminder: $0) })
             .toolbarBackground(palette.paper, for: .tabBar)
@@ -58,16 +83,50 @@ private struct NudgeAgenda: View {
     @ObservedObject var store: ReminderStore
     let todayOnly: Bool
     let palette: NudgePalette
+    let notificationRequest: ReminderNotificationOpen?
+    let didOpenNotification: (ReminderNotificationOpen) -> Void
     let newReminder: (Date?) -> Void
     let editReminder: (Reminder) -> Void
     @Environment(\.openURL) private var openURL
     @State private var selectedDay: Date?
     @State private var showCompleted = false
     @State private var pendingDelete: Reminder?
+    @State private var expandedTime: ExpandedTime?
+    @State private var adjustmentIssue: String?
+    @State private var scrollRequest: ReminderNotificationOpen?
+
+    private struct ExpandedTime {
+        let id: ReminderOccurrence.ID
+        let placement: Reminder?
+        var generation: UUID
+    }
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 15)) { context in
-            agenda(at: context.date)
+        ScrollViewReader { proxy in
+            TimelineView(.periodic(from: .now, by: 15)) { context in
+                agenda(at: context.date)
+            }
+            .onChange(of: scrollRequest, initial: true) { _, request in
+                guard let request, let id = expandedTime?.id else { return }
+                Task { @MainActor in
+                    await Task.yield()
+                    guard scrollRequest == request, expandedTime?.id == id else { return }
+                    withAnimation { proxy.scrollTo(id, anchor: .center) }
+                }
+            }
+        }
+        .onChange(of: notificationRequest, initial: true) { _, request in
+            guard let request else { return }
+            if let reminder = store.reminders.first(where: {
+                $0.id == request.id && $0.generation == request.generation && $0.completedAt == nil
+            }) {
+                selectedDay = nil
+                showCompleted = false
+                pendingDelete = nil
+                openTime(ReminderOccurrence(reminder))
+                scrollRequest = request
+            }
+            didOpenNotification(request)
         }
         .background(palette.paper.ignoresSafeArea())
         .confirmationDialog(pendingDelete.map { $0.completedAt == nil && $0.preferences.repeatRule != .never } == true ? "Delete repeating reminder?" : "Delete reminder?", isPresented: Binding(
@@ -83,7 +142,14 @@ private struct NudgeAgenda: View {
     private func agenda(at now: Date) -> some View {
         let calendar = Calendar.autoupdatingCurrent
         let today = calendar.startOfDay(for: now)
-        let presentation = AgendaPresentation(reminders: store.reminders, todayOnly: todayOnly,
+        let placed = store.reminders.map { reminder in
+            if let expandedTime, let placement = expandedTime.placement,
+               reminder.id == placement.id && reminder.generation == expandedTime.generation {
+                return placement
+            }
+            return reminder
+        }
+        let presentation = AgendaPresentation(reminders: placed, todayOnly: todayOnly,
                                              selectedDay: selectedDay, now: now, calendar: calendar)
         let viewedDay = presentation.viewedDay
         let isToday = presentation.isToday
@@ -174,6 +240,7 @@ private struct NudgeAgenda: View {
                 Button {
                     selectedDay = day
                     showCompleted = false
+                    closeTime()
                 } label: {
                     VStack(spacing: 5) {
                         Text(String(day.formatted(.dateTime.weekday(.abbreviated)).prefix(1)))
@@ -197,6 +264,7 @@ private struct NudgeAgenda: View {
         let selected = showCompleted == completed
         return Button {
             showCompleted = completed
+            closeTime()
         } label: {
             HStack(spacing: 5) {
                 Text(label).font(.subheadline.weight(selected ? .semibold : .regular))
@@ -231,45 +299,54 @@ private struct NudgeAgenda: View {
     }
 
     private func reminderRow(_ occurrence: ReminderOccurrence, now: Date) -> some View {
-        let reminder = occurrence.reminder
+        let reminder = liveReminder(for: occurrence)
+        let current = occurrence.isProjected ? occurrence : ReminderOccurrence(reminder)
         let completed = reminder.completedAt != nil
         let restoreTitle = reminder.preferences.repeatRule == .never ? "Restore" : "Restore as one-time reminder"
-        return HStack(spacing: 6) {
-            if occurrence.isProjected {
-                Image(systemName: "repeat")
-                    .font(.body).foregroundStyle(palette.secondary)
-                    .frame(width: 44, height: 44)
-                    .accessibilityLabel("Planned repeat")
-            } else {
-                Button {
-                    if completed { store.restore(reminder) }
-                    else { Task { await store.done(reminder) } }
-                } label: {
-                    Image(systemName: completed ? "checkmark.circle.fill" : "circle")
-                        .font(.title3)
-                        .foregroundStyle(completed ? palette.green : palette.accent)
+        let expanded = isExpanded(occurrence, reminder: reminder)
+        return VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                if occurrence.isProjected {
+                    Image(systemName: "repeat")
+                        .font(.body).foregroundStyle(palette.secondary)
                         .frame(width: 44, height: 44)
+                        .accessibilityLabel("Planned repeat")
+                } else {
+                    Button {
+                        if completed { store.restore(reminder) }
+                        else { Task { await store.done(reminder) } }
+                    } label: {
+                        Image(systemName: completed ? "checkmark.circle.fill" : "circle")
+                            .font(.title3)
+                            .foregroundStyle(completed ? palette.green : palette.accent)
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel((completed ? restoreTitle : "Done") + ", " + reminder.title)
+                }
+                Button {
+                    toggleTime(occurrence, current: current)
+                } label: {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(reminder.title).font(.body.weight(.medium)).foregroundStyle(palette.ink)
+                        Text(reminderDetail(current, now: now))
+                            .font(.footnote).foregroundStyle(palette.secondary)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel((completed ? restoreTitle : "Done") + ", " + reminder.title)
+                .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+                .accessibilityHint(expanded ? "Collapse time adjustments" : "Show time adjustments")
+                reminderMenu(current, now: now)
             }
-            Button {
-                if completed { store.restore(reminder) }
-                else { editReminder(reminder) }
-            } label: {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(reminder.title).font(.body.weight(.medium)).foregroundStyle(palette.ink)
-                    Text(reminderDetail(occurrence, now: now))
-                        .font(.footnote).foregroundStyle(palette.secondary)
-                }
-                .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-                .contentShape(Rectangle())
+            .padding(.vertical, 3)
+            .padding(.horizontal, 4)
+            if expanded {
+                  quickTimeMenu(current, now: now).padding(.horizontal, 10).padding(.bottom, 10)
             }
-            .buttonStyle(.plain)
-            reminderMenu(occurrence, now: now)
         }
-        .padding(.vertical, 3)
-        .padding(.horizontal, 4)
+        .id(occurrence.id)
     }
 
     private func reminderDetail(_ occurrence: ReminderOccurrence, now: Date) -> String {
@@ -285,12 +362,14 @@ private struct NudgeAgenda: View {
             let date: Date.FormatStyle.DateStyle = Calendar.autoupdatingCurrent.isDate(snooze, inSameDayAs: now) ? .omitted : .abbreviated
             return (snooze > now ? "Snoozed until " : "Snooze ended ") + snooze.formatted(date: date, time: .shortened)
         }
-        let date = reminder.due.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute())
+        let date = occurrence.date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute())
         return reminder.preferences.repeatRule == .never ? date : date + " · " + reminder.preferences.repeatRule.rawValue
     }
 
     private func nextCard(_ occurrence: ReminderOccurrence, now: Date) -> some View {
-        let reminder = occurrence.reminder
+        let reminder = liveReminder(for: occurrence)
+        let current = occurrence.isProjected ? occurrence : ReminderOccurrence(reminder)
+        let expanded = isExpanded(occurrence, reminder: reminder)
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Label(occurrence.isProjected ? "PLANNED REPEAT" : "UP NEXT", systemImage: occurrence.isProjected ? "repeat" : "circle.fill")
@@ -302,11 +381,11 @@ private struct NudgeAgenda: View {
                             .frame(width: 44, height: 44)
                     }.buttonStyle(.plain).accessibilityLabel("Done, " + reminder.title)
                 }
-                reminderMenu(occurrence, now: now)
+                reminderMenu(current, now: now)
             }
-            Button { editReminder(reminder) } label: {
+            Button { toggleTime(occurrence, current: current) } label: {
                 VStack(alignment: .leading, spacing: 7) {
-                    Text(occurrence.date, style: .time).font(.largeTitle.weight(.medium).monospacedDigit())
+                    Text(current.date, style: .time).font(.largeTitle.weight(.medium).monospacedDigit())
                     Text(reminder.title).font(.title3.weight(.semibold))
                     Text(reminder.notes.isEmpty ? (reminder.preferences.notifications ? "We’ll give you a little nudge." : "Saved here with notifications off.") : reminder.notes)
                         .font(.subheadline).foregroundStyle(palette.secondary).lineLimit(3)
@@ -314,17 +393,117 @@ private struct NudgeAgenda: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }.buttonStyle(.plain)
+            .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+            .accessibilityHint(expanded ? "Collapse time adjustments" : "Show time adjustments")
             Divider().overlay(palette.accent.opacity(0.25))
             let cadence = reminder.preferences.nagMinutes
             let alert = !reminder.preferences.notifications ? "Notifications off" : cadence == 0 ? "One gentle nudge" : "Every \(cadence) min"
             Label(alert, systemImage: "bell").font(.footnote.weight(.medium)).foregroundStyle(palette.accent)
-            if !Calendar.autoupdatingCurrent.isDate(occurrence.date, inSameDayAs: now) {
-                Text(occurrence.date, format: .dateTime.weekday(.wide).month(.abbreviated).day())
+            if !Calendar.autoupdatingCurrent.isDate(current.date, inSameDayAs: now) {
+                Text(current.date, format: .dateTime.weekday(.wide).month(.abbreviated).day())
                     .font(.footnote).foregroundStyle(palette.secondary)
             }
+            if expanded { quickTimeMenu(current, now: now) }
         }
         .padding(16)
         .nudgePanel(palette, fill: palette.coral)
+        .id(occurrence.id)
+    }
+
+    private func liveReminder(for occurrence: ReminderOccurrence) -> Reminder {
+        store.reminders.first { $0.id == occurrence.reminder.id } ?? occurrence.reminder
+    }
+
+    private func isExpanded(_ occurrence: ReminderOccurrence, reminder: Reminder) -> Bool {
+        expandedTime?.id == occurrence.id && expandedTime?.generation == reminder.generation
+    }
+
+    private func toggleTime(_ occurrence: ReminderOccurrence, current: ReminderOccurrence) {
+        if isExpanded(occurrence, reminder: current.reminder) { closeTime() }
+        else { openTime(current) }
+    }
+
+    private func openTime(_ occurrence: ReminderOccurrence) {
+        let reminder = occurrence.reminder
+        let placement = occurrence.isProjected || reminder.completedAt != nil ? nil : reminder
+        expandedTime = ExpandedTime(id: occurrence.id, placement: placement, generation: reminder.generation)
+        adjustmentIssue = nil
+    }
+
+    private func closeTime() {
+        expandedTime = nil
+        adjustmentIssue = nil
+    }
+
+    private func quickTimeMenu(_ occurrence: ReminderOccurrence, now: Date) -> some View {
+        let reminder = occurrence.reminder
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("Adjust time", systemImage: "clock").font(.subheadline.weight(.semibold))
+                Spacer()
+                Text(occurrence.date, format: .dateTime.month(.abbreviated).day().hour().minute())
+                    .font(.caption.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(palette.accent)
+            }
+            if reminder.completedAt != nil {
+                Text("Restore this reminder to adjust its time.").font(.footnote).foregroundStyle(palette.secondary)
+            } else if occurrence.isProjected {
+                Text("Adjust the current reminder from Today or Upcoming.")
+                    .font(.footnote).foregroundStyle(palette.secondary)
+            } else {
+                Text(occurrence.date <= now ? "Later options start from now." : "Each tap updates the scheduled time.")
+                    .font(.footnote).foregroundStyle(palette.secondary)
+                Grid(alignment: .leading, horizontalSpacing: 7, verticalSpacing: 7) {
+                    GridRow {
+                        Text("Earlier")
+                        Text("Later")
+                    }
+                    .font(.caption).foregroundStyle(palette.secondary)
+                    ForEach(ReminderTimeShift.allCases, id: \.self) { shift in
+                        GridRow {
+                            shiftButton(shift, direction: .earlier, reminder: reminder, now: now)
+                            shiftButton(shift, direction: .later, reminder: reminder, now: now)
+                        }
+                    }
+                }
+            }
+            if let adjustmentIssue {
+                Text(adjustmentIssue).font(.footnote).foregroundStyle(palette.accent)
+            }
+        }
+        .padding(11)
+        .nudgePanel(palette, fill: palette.canvas)
+    }
+
+    private func shiftButton(_ shift: ReminderTimeShift, direction: ReminderTimeShift.Direction,
+                             reminder: Reminder, now: Date) -> some View {
+        let candidate = shift.date(from: reminder.alertDate, direction: direction, now: now)
+        let earlier = direction == .earlier
+        return Button {
+            adjustmentIssue = store.adjustTime(reminder, by: shift, direction: direction)
+            if adjustmentIssue == nil,
+               let latest = store.reminders.first(where: { $0.id == reminder.id && $0.completedAt == nil }) {
+                expandedTime?.generation = latest.generation
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text((earlier ? "−" : "+") + shift.rawValue).font(.subheadline.weight(.semibold))
+                if let candidate {
+                    Text(candidate, format: .dateTime.month(.abbreviated).day().hour().minute())
+                        .font(.caption2).foregroundStyle(palette.secondary)
+                } else {
+                    Text("Past time").font(.caption2).foregroundStyle(palette.secondary)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .nudgePanel(palette)
+        }
+        .buttonStyle(.plain)
+        .disabled(candidate == nil)
+        .opacity(candidate == nil ? 0.55 : 1)
+        .accessibilityLabel("Move " + shift.rawValue + (earlier ? " earlier" : " later"))
     }
 
     private func reminderMenu(_ occurrence: ReminderOccurrence, now: Date) -> some View {
@@ -335,7 +514,10 @@ private struct NudgeAgenda: View {
                 Button(reminder.preferences.repeatRule == .never ? "Restore" : "Restore as one-time reminder",
                        systemImage: "arrow.uturn.backward") { store.restore(reminder) }
             } else {
-                Button(occurrence.isProjected ? "Edit repeating reminder" : "Edit", systemImage: "pencil") { editReminder(reminder) }
+                Button(occurrence.isProjected ? "Edit repeating reminder" : "Edit", systemImage: "pencil") {
+                    closeTime()
+                    editReminder(reminder)
+                }
                 if AgendaPresentation.canSnooze(occurrence, now: now) {
                     Button("Snooze 15 min", systemImage: "clock") { store.snooze(reminder) }
                 }
@@ -365,4 +547,3 @@ private struct NudgeAgenda: View {
         .nudgePanel(palette)
     }
 }
-

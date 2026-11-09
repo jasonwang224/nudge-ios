@@ -133,6 +133,15 @@ let oldEdited = try draft(original: old, title: "Rename", day: exact, preference
 expect(oldEdited.due == exact && oldEdited.phoneSchedule == nil, "Legacy edit rounded seconds or changed scheduling mode")
 
 let defaults = custom
+var quickMoved = advanced
+quickMoved.adjustedDue = date(2026, 11, 8, 10, 5, 24)
+let quickRename = try draft(original: quickMoved, title: "Keep the moved time", day: tomorrow,
+                            time: "1005", preferences: daily)
+expect(quickRename.alertDate == quickMoved.alertDate && quickRename.phoneSchedule == quickMoved.phoneSchedule,
+       "Editing the title must preserve the adjusted occurrence and the repeat schedule")
+let quickEdit = try draft(original: quickMoved, day: tomorrow, time: "1115", preferences: daily)
+expect(quickEdit.adjustedDue == nil && quickEdit.alertDate == date(2026, 11, 8, 11, 15),
+       "Explicit date or time edits must replace the quick adjustment")
 var individual = try draft(day: date(2026, 11, 10), preferences: defaults)
 individual.preferences.sound = .silent
 individual.preferences.weekdays.remove(3)

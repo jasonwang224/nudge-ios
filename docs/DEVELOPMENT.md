@@ -2,11 +2,17 @@
 
 [Back to Nudge](../README.md)
 
-This document preserves the build instructions, audit notes, and development history from the original README. The current release is 1.0.9 (11). Sections explicitly labeled as experiments describe older builds and are not instructions for the current app.
+This document preserves the build instructions, audit notes, and development history from the original README. The current release is 1.1.0 (12). Sections explicitly labeled as experiments describe older builds and are not instructions for the current app.
 
 Native SwiftUI reminder app for the iPhone 11 Pro on iOS 17.4.1. The deployment target is iOS 17.4.
 
-On a Mac with Xcode, run `bash scripts/build-ipa.sh`. GitHub Actions runs the same script on macOS, checking agenda/calendar behavior, notifications, and database safeguards before building. Download the **Nudge-1.0.9-Unsigned** artifact and extract the IPA. Use a sideloading tool to sign it with a provisioning profile for your iPhone. This is build 11, using the existing `com.jasonwang224.nudge` identifier. Install over the existing app with the same signing account and app identifier to retain its reminders, then open Nudge once to refresh queued notifications.
+On a Mac with Xcode, run `bash scripts/build-ipa.sh`. GitHub Actions runs the same script on macOS, checking agenda/calendar behavior, notifications, and database safeguards before building. Download the **Nudge-1.1.0-Unsigned** artifact and extract the IPA. Use a sideloading tool to sign it with a provisioning profile for your iPhone. This is build 12, using the existing `com.jasonwang224.nudge` identifier. Install over the existing app with the same signing account and app identifier to retain its reminders, then open Nudge once to refresh queued notifications.
+
+## Version 1.1.0 (12)
+
+- Tap a reminder row to open or close the time menu. Each valid adjustment saves immediately and keeps the row in place until the menu closes. The three dots contain the full editor.
+- Tapping a current Lock Screen alert opens the reminder’s menu on Today or Upcoming. Later choices start from now for a fired reminder. Choices that would schedule a past time are disabled.
+- A quick adjustment affects the current occurrence. Repeat schedules retain their original time. The saved adjustment is an optional field in the version 1 database.
 
 ## Version 1.0.9 (11)
 

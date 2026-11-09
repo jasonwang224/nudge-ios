@@ -25,8 +25,9 @@ enum ReminderLifecycle {
                   original.map({ matchesEditableVersion(previous, $0) }) ?? true else { throw Problem.changed }
             let clockChanged = previous.due != saved.due
                 || !sameClock(previous.phoneSchedule, saved.phoneSchedule, referenceDate: previous.due)
-            if clockChanged {
+            if clockChanged || (previous.adjustedDue != nil && saved.adjustedDue == nil) {
                 saved.repeatAnchor = saved.due
+                saved.adjustedDue = nil
                 saved.snoozedUntil = nil
             }
             // An already-delivered one-off has no future request to replace its
@@ -84,6 +85,7 @@ enum ReminderLifecycle {
             occurrence.id = UUID()
             occurrence.completedAt = now
             changed.reminders[index].due = next
+            changed.reminders[index].adjustedDue = nil
             if let schedule = previous.phoneSchedule,
                var resolved = schedule.resolvingCalendar(relativeTo: previous.due, calendar: calendar),
                let recurrenceCalendar = resolved.resolvedCalendar(relativeTo: previous.due, calendar: calendar) {
@@ -114,10 +116,25 @@ enum ReminderLifecycle {
     static func snoozing(_ reminder: Reminder, in snapshot: ReminderSnapshot, now: Date = .now) -> Change? {
         guard let index = currentIndex(reminder, in: snapshot) else { return nil }
         let previous = snapshot.reminders[index]
-        guard previous.due <= now else { return nil }
+        guard previous.occurrenceDue <= now else { return nil }
         var changed = snapshot
         changed.reminders[index].generation = UUID()
         changed.reminders[index].snoozedUntil = now.addingTimeInterval(15 * 60)
+        return Change(snapshot: changed, retiring: previous)
+    }
+
+    static func adjusting(_ reminder: Reminder, by shift: ReminderTimeShift, direction: ReminderTimeShift.Direction,
+                          in snapshot: ReminderSnapshot, now: Date = .now,
+                          calendar: Calendar = .autoupdatingCurrent) -> Change? {
+        guard let index = currentIndex(reminder, in: snapshot) else { return nil }
+        let previous = snapshot.reminders[index]
+        guard let due = shift.date(from: previous.alertDate, direction: direction, now: now, calendar: calendar) else {
+            return nil
+        }
+        var changed = snapshot
+        changed.reminders[index].generation = UUID()
+        changed.reminders[index].adjustedDue = due
+        changed.reminders[index].snoozedUntil = nil
         return Change(snapshot: changed, retiring: previous)
     }
 

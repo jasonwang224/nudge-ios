@@ -21,13 +21,14 @@ struct ReminderEditor: View {
         self.store = store
         original = reminder
         let now = Date.now
-        let date = reminder?.due ?? initialDay ?? now
+        let date = reminder?.occurrenceDue ?? initialDay ?? now
         let calendar = reminder.flatMap {
             $0.phoneSchedule?.resolvedCalendar(relativeTo: $0.due)
         } ?? Calendar.autoupdatingCurrent
-        let components = calendar.dateComponents([.hour, .minute], from: reminder?.due ?? now)
-        let hour = reminder?.phoneSchedule?.hour ?? components.hour ?? 9
-        let minute = reminder?.phoneSchedule?.minute ?? components.minute ?? 0
+        let components = calendar.dateComponents([.hour, .minute], from: reminder?.occurrenceDue ?? now)
+        let schedule = reminder?.adjustedDue == nil ? reminder?.phoneSchedule : nil
+        let hour = schedule?.hour ?? components.hour ?? 9
+        let minute = schedule?.minute ?? components.minute ?? 0
         _title = State(initialValue: reminder?.title ?? "")
         _notes = State(initialValue: reminder?.notes ?? "")
         _day = State(initialValue: date)

@@ -24,7 +24,7 @@ enum NotificationRequestFactory {
             content.sound = UNNotificationSound(named: UNNotificationSoundName(rawValue: name))
         }
         let trigger: UNNotificationTrigger
-        if alert.index == 0 && reminder.phoneSchedule != nil && reminder.snoozedUntil == nil {
+        if alert.index == 0 && reminder.phoneSchedule != nil && reminder.snoozedUntil == nil && reminder.adjustedDue == nil {
             let parts = Calendar.autoupdatingCurrent.dateComponents(
                 [.era, .year, .month, .day, .hour, .minute, .second], from: alert.date
             )

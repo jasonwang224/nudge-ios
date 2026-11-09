@@ -1,5 +1,36 @@
 import Foundation
 
+enum ReminderTimeShift: String, CaseIterable {
+    case fiveMinutes = "5 min"
+    case hour = "1 hour"
+    case day = "1 day"
+
+    enum Direction: Equatable {
+        case earlier, later
+    }
+
+    func date(from due: Date, direction: Direction, now: Date,
+              calendar: Calendar = .autoupdatingCurrent) -> Date? {
+        let start = max(due, now)
+        let sign = direction == .earlier ? -1 : 1
+        let candidate: Date?
+        switch self {
+        case .fiveMinutes: candidate = start.addingTimeInterval(Double(sign) * 300)
+        case .hour: candidate = start.addingTimeInterval(Double(sign) * 3600)
+        case .day: candidate = calendar.date(byAdding: .day, value: sign, to: start)
+        }
+        guard let candidate, candidate > now,
+              abs(candidate.timeIntervalSinceReferenceDate) < 100_000_000_000 else { return nil }
+        return candidate
+    }
+}
+
+struct ReminderNotificationOpen: Equatable {
+    let id: UUID
+    let generation: UUID
+    let token = UUID()
+}
+
 // A read-only snapshot shared by the date strip, filters, and agenda sections.
 struct AgendaPresentation {
     let viewedDay: Date
@@ -13,7 +44,13 @@ struct AgendaPresentation {
 
     static func canSnooze(_ occurrence: ReminderOccurrence, now: Date) -> Bool {
         !occurrence.isProjected && occurrence.reminder.completedAt == nil
-            && occurrence.reminder.due <= now
+            && occurrence.reminder.occurrenceDue <= now
+    }
+
+    static func includesToday(_ reminder: Reminder, now: Date = .now,
+                              calendar: Calendar = .autoupdatingCurrent) -> Bool {
+        !ReminderOccurrence.entries(reminders: [reminder], on: calendar.startOfDay(for: now),
+                                    now: now, calendar: calendar).isEmpty
     }
 
     init(reminders: [Reminder], todayOnly: Bool, selectedDay: Date?, now: Date,

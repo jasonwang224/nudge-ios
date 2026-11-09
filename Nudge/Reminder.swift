@@ -142,16 +142,18 @@ struct Reminder: Codable, Identifiable, Equatable {
     var repeatAnchor: Date
     var preferences: ReminderPreferences
     var phoneSchedule: PhoneSchedule?
+    var adjustedDue: Date?
     var snoozedUntil: Date?
     var completedAt: Date?
     // Optional for backward compatibility. Legacy generations keep visible nags.
     var soundOnlyAfterIndex: Int?
     var soundOnlyAnchorAccepted: Bool?
 
-    var alertDate: Date { snoozedUntil ?? due }
+    var occurrenceDue: Date { adjustedDue ?? due }
+    var alertDate: Date { snoozedUntil ?? occurrenceDue }
 
     var hasValidSchedule: Bool {
-        let dates = [due, repeatAnchor, snoozedUntil, completedAt].compactMap { $0 }
+        let dates = [due, repeatAnchor, adjustedDue, snoozedUntil, completedAt].compactMap { $0 }
         return dates.allSatisfy { abs($0.timeIntervalSinceReferenceDate) < 100_000_000_000 }
             && ReminderPreferences.nagIntervals.contains(preferences.nagMinutes)
             && preferences.weekdays.allSatisfy { (1...7).contains($0) }

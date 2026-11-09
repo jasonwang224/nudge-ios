@@ -110,6 +110,21 @@ enum ReminderEditorDraft {
         let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { throw Problem.emptyTitle }
         guard !time.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw Problem.emptyTime }
+        let patternChanged = original.map {
+            $0.preferences.repeatRule != preferences.repeatRule
+                || (preferences.repeatRule == .custom && $0.preferences.weekdays != preferences.weekdays)
+        } ?? false
+        if !patternChanged, var existing = original, let adjusted = existing.adjustedDue,
+           let input = clock(time: time, isPM: isPM),
+           calendar.isDate(day, inSameDayAs: adjusted),
+           calendar.component(.hour, from: adjusted) == input.hour,
+           calendar.component(.minute, from: adjusted) == input.minute {
+            guard preferences.repeatRule != .custom || !preferences.weekdays.isEmpty else { throw Problem.emptyWeekdays }
+            existing.title = name
+            existing.notes = notes
+            existing.preferences = preferences
+            return existing
+        }
         let prepared = try preparedSchedule(time: time, day: day, isPM: isPM, original: original, now: now, calendar: calendar)
         var schedule = prepared.schedule
         let effectiveCalendar = prepared.calendar
@@ -121,15 +136,12 @@ enum ReminderEditorDraft {
         let sameLegacyMinute = original?.phoneSchedule == nil && original.map {
             effectiveCalendar.isDate($0.due, equalTo: date, toGranularity: .minute)
         } == true
-        guard sameClock || sameLegacyMinute || date > now else { throw Problem.pastDate }
+        let unchangedSchedule = original?.adjustedDue == nil && (sameClock || sameLegacyMinute)
+        guard unchangedSchedule || date > now else { throw Problem.pastDate }
 
-        let patternChanged = original.map {
-            $0.preferences.repeatRule != preferences.repeatRule
-                || (preferences.repeatRule == .custom && $0.preferences.weekdays != preferences.weekdays)
-        } ?? false
         // Existing reminders may predate this validation. Do not block harmless
         // title/note edits to an unchanged schedule, even when it is overdue.
-        if original == nil || patternChanged || !(sameClock || sameLegacyMinute) {
+        if original == nil || patternChanged || !unchangedSchedule {
             let weekday = effectiveCalendar.component(.weekday, from: date)
             if preferences.repeatRule == .weekdays && (weekday == 1 || weekday == 7) {
                 throw Problem.excludedWeekday
@@ -149,6 +161,7 @@ enum ReminderEditorDraft {
         result.title = name
         result.notes = notes
         result.due = sameLegacyMinute ? (original?.due ?? date) : date
+        result.adjustedDue = nil
         result.phoneSchedule = sameLegacyMinute ? nil : schedule
         result.preferences = preferences
         if patternChanged || prepared.repairedCalendar { result.repeatAnchor = result.due }

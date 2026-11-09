@@ -17,6 +17,41 @@ let dailyDueComponents = calendar.dateComponents([.era, .year, .month, .day], fr
 daily.phoneSchedule?.day = dailyDueComponents
 let unrelated = Reminder(title: "Unrelated", notes: "Keep me", due: date(8, 18), repeatAnchor: date(8, 18), preferences: ReminderPreferences())
 let original = ReminderSnapshot(reminders: [daily, unrelated])
+precondition(AgendaPresentation.includesToday(daily, now: now, calendar: calendar))
+precondition(!AgendaPresentation.includesToday(unrelated, now: now, calendar: calendar))
+precondition(ReminderLifecycle.adjusting(daily, by: .fiveMinutes, direction: .earlier,
+    in: original, now: now, calendar: calendar) == nil)
+let firstShift = ReminderLifecycle.adjusting(daily, by: .fiveMinutes, direction: .later,
+    in: original, now: now, calendar: calendar)!
+let firstMoved = current(firstShift.snapshot, daily.id)
+precondition(firstMoved.alertDate == date(7, 9, 5) && firstShift.retiring == daily)
+precondition(ReminderLifecycle.adjusting(daily, by: .fiveMinutes, direction: .later,
+    in: firstShift.snapshot, now: now, calendar: calendar) == nil, "A stale row cannot move a newer occurrence.")
+let secondShift = ReminderLifecycle.adjusting(firstMoved, by: .hour, direction: .later,
+    in: firstShift.snapshot, now: now, calendar: calendar)!
+let moved = current(secondShift.snapshot, daily.id)
+precondition(moved.alertDate == date(7, 10, 5) && moved.generation != firstMoved.generation)
+precondition(moved.due == daily.due && moved.phoneSchedule == daily.phoneSchedule && moved.repeatAnchor == daily.repeatAnchor)
+precondition(current(secondShift.snapshot, unrelated.id) == unrelated)
+precondition(AlertPlan(reminders: secondShift.snapshot.reminders, now: now).alerts.first?.date == moved.alertDate)
+precondition(!AgendaPresentation.canSnooze(ReminderOccurrence(moved), now: now))
+let moveToTomorrow = ReminderLifecycle.adjusting(moved, by: .day, direction: .later,
+    in: secondShift.snapshot, now: now, calendar: calendar)!
+let tomorrowMoved = current(moveToTomorrow.snapshot, daily.id)
+precondition(tomorrowMoved.alertDate == date(8, 10, 5))
+precondition(!AgendaPresentation.includesToday(tomorrowMoved, now: now, calendar: calendar))
+let movedDone = ReminderLifecycle.completing(tomorrowMoved, in: moveToTomorrow.snapshot,
+    now: date(8, 10, 6), calendar: calendar)!
+let nextAfterMove = current(movedDone.snapshot, daily.id)
+precondition(nextAfterMove.adjustedDue == nil && nextAfterMove.alertDate == date(9, 8),
+             "Moving an occurrence must not change the series time.")
+let moveBytes = try JSONEncoder().encode(moveToTomorrow.snapshot)
+let decodedMove = try JSONDecoder().decode(ReminderSnapshot.self, from: moveBytes).validated()
+precondition(decodedMove == moveToTomorrow.snapshot)
+let spring = calendar.date(from: DateComponents(year: 2027, month: 3, day: 13, hour: 9))!
+let springNext = calendar.date(from: DateComponents(year: 2027, month: 3, day: 14, hour: 9))!
+precondition(ReminderTimeShift.day.date(from: spring, direction: .later, now: now, calendar: calendar) == springNext)
+
 precondition(ReminderLifecycle.snoozing(unrelated, in: original, now: now) == nil,
              "Snooze must not move tomorrow's reminder to fifteen minutes from now.")
 
