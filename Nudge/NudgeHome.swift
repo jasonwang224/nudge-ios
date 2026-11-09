@@ -6,7 +6,6 @@ import UIKit
 struct NudgeHome: View {
     @ObservedObject var store: ReminderStore
     @Environment(\.colorScheme) private var scheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("Nudge.appearance") private var appearance: NudgeAppearance = .system
     @State private var editor: EditorItem?
     @State private var pendingCompletion: ReminderOccurrence?
@@ -14,9 +13,7 @@ struct NudgeHome: View {
     @State private var notificationRequest: ReminderNotificationOpen?
     @State private var notificationDestination: Tab?
 
-    private var reminderAnimation: Animation? {
-        reduceMotion ? nil : .easeInOut(duration: 0.36)
-    }
+    private let reminderAnimation = Animation.easeInOut(duration: 0.36)
 
     private enum Tab: Hashable {
         case today, upcoming, settings
@@ -102,13 +99,14 @@ private struct NudgeAgenda: View {
     @ObservedObject var store: ReminderStore
     let todayOnly: Bool
     let palette: NudgePalette
-    let reminderAnimation: Animation?
+    let reminderAnimation: Animation
     let notificationRequest: ReminderNotificationOpen?
     let didOpenNotification: (ReminderNotificationOpen) -> Void
     let newReminder: (Date?) -> Void
     let editReminder: (Reminder) -> Void
     let confirmCompletion: (ReminderOccurrence) -> Void
     @Environment(\.openURL) private var openURL
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @State private var now = Date.now
     @State private var selectedDay: Date?
@@ -138,7 +136,7 @@ private struct NudgeAgenda: View {
                     Task { @MainActor in
                         await Task.yield()
                         guard scrollRequest == request, expandedTime?.id == id else { return }
-                        withAnimation(reminderAnimation) { proxy.scrollTo(id, anchor: .center) }
+                        withAnimation(reduceMotion ? nil : reminderAnimation) { proxy.scrollTo(id, anchor: .center) }
                     }
                 }
         }
