@@ -1,0 +1,23 @@
+name: Build one-minute nag probe
+
+on:
+  push:
+    branches: [build/alarmed-nag-probe]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build arm64 iPhone probe for iOS 17.4
+        run: bash Checks/AlarmedNagProbe/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Alarmed-Nag-Probe-Unsigned
+          path: artifacts/Alarmed-Nag-Probe-Unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
