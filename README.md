@@ -43,13 +43,13 @@ The call you keep meaning to make. The plants waiting for water. A moment to ste
   </tr>
 </table>
 
-<p align="center"><sub>Images from our <a href="https://nudge-reminders-studio.jasonwang224.chatgpt.site">Sites design prototype</a>. Native screens and iOS notification appearance differ. Native Nag Me uses a finite queue; see delivery notes below. Preview access may be required.</sub></p>
+<p align="center"><sub>Images from our <a href="https://nudge-reminders-studio.jasonwang224.chatgpt.site">Sites design prototype</a>. Native screens and iOS notification appearance differ. See the delivery notes below for native Nag Me behavior. Preview access may be required.</sub></p>
 
 ## A reminder that fits your day
 
 **Type 830. Choose AM or PM. You're set.** A blank time field and numeric keypad make adding reminders quick. Pick Today, Tomorrow, the upcoming weekday shortcut, or a date of your own. Add a note when the little details matter.
 
-**Need another nudge? Choose the pace.** Nag Me schedules follow-up notifications every **2, 5, 10, 15, 20, or 30 minutes**. Choose Off for a single alert. Queued reminders can arrive with Nudge closed; see the delivery notes below.
+**Need another nudge? Choose the pace.** Nag Me schedules follow-up notifications every **2, 5, 10, 15, 20, or 30 minutes**. Choose **1 min** to test a single repeating alert, or Off for a single alert. Queued reminders can arrive with the app closed.
 
 **Keep your routines close.** Repeat daily, on weekdays, weekly, monthly, yearly, or on your own selection of weekdays. Complete the current reminder and Nudge schedules the next occurrence. In Today, you can mark a future occurrence Done and still receive the rest of the series.
 
@@ -74,9 +74,9 @@ Tap the alert itself to open the reminder’s time menu.
 
 ## Get Nudge
 
-**Current test build: 1.1.7 (19).** Built for iOS 17.4 and later, with testing centered on the iPhone 11 Pro running iOS 17.4.1.
+**Current test build: 1.1.8 (20).** Built for iOS 17.4 and later, with testing centered on the iPhone 11 Pro running iOS 17.4.1.
 
-1. Open the latest successful run in [Build Nudge IPA](https://github.com/jasonwang224/nudge-ios/actions/workflows/ipa.yml) and download **Nudge-1.1.7-Unsigned** from **Artifacts**. Extract the ZIP to find the IPA. GitHub sign-in and repository access are required. Artifacts are time-limited.
+1. Open the latest successful run in [Build Nudge IPA](https://github.com/jasonwang224/nudge-ios/actions/workflows/ipa.yml) and download **Nudge-1.1.8-Unsigned** from **Artifacts**. Extract the ZIP to find the IPA. GitHub sign-in and repository access are required. Artifacts are time-limited.
 2. Sign and install the IPA with your preferred sideloading tool. This is an unsigned test build, not an App Store download.
 3. Open Nudge, allow notifications, and enable Lock Screen alerts and Sounds in iPhone Settings. Set your defaults and add your first reminder.
 
@@ -88,7 +88,7 @@ Already using Nudge? Install over the existing app with the same signing account
 <summary><strong>A few things to know about reminders</strong></summary>
 
 - **Closed app, local delivery.** Nudge hands notifications to iOS in advance, so scheduled alerts do not need the app open. Permissions, Focus, Silent mode, and scheduled delivery can affect presentation and sound. iOS controls screen wake and vibration.
-- **Nag Me has a finite queue.** Nudge budgets 60 pending notifications across all reminders, prioritizes an initial alert for each active reminder, and uses the remaining slots for nags. It refills the queue when you open the app or use a notification action. Nagging is not guaranteed indefinitely without that refill.
+- **Nag Me uses a shared queue.** The app budgets 60 pending notifications and prioritizes an initial alert for each active reminder. **1 min** uses one legacy repeating request when iOS accepts it. Other intervals and the one-minute fallback use individual alerts, which the app refills when you open it or use a notification action.
 - **More than one card can appear.** Repeated nags may leave multiple notification cards while Nudge is closed.
 - **Future days are previews.** Repeating reminders appear on future dates in Today. Completing the current occurrence advances the actual scheduled series.
 - **Your phone sets the clock.** Calendar-based routines follow local wall-clock time. When daylight saving skips a selected time, Nudge uses the next available time and explains the adjustment in the editor. Open Nudge after changing the phone's calendar system.

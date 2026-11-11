@@ -34,7 +34,7 @@ enum AlertSound: String, Codable, CaseIterable, Identifiable {
 }
 
 struct ReminderPreferences: Codable, Equatable {
-    static let nagIntervals = [0, 2, 5, 10, 15, 20, 30]
+    static let nagIntervals = [0, 1, 2, 5, 10, 15, 20, 30]
 
     var nagMinutes = 5
     var repeatRule = RepeatRule.never
@@ -255,6 +255,7 @@ struct ScheduledAlert: Equatable {
     var reminder: Reminder
     var index: Int
     var date: Date
+    var repeatsEveryMinute = false
 
     var identifier: String {
         "\(Self.prefix)\(reminder.id.uuidString).\(reminder.generation.uuidString).\(index)"
@@ -284,7 +285,7 @@ struct PendingNudge {
     var generationIdentifier: String { "\(id.uuidString).\(generation.uuidString)" }
 
     func canRetire(current: [UUID: Reminder], deletedIDs: Set<UUID>, queuedReplacement: Set<UUID>,
-                   stoppedGenerations: Set<String> = [], now: Date = .now) -> Bool {
+                   stoppedGenerations: Set<String> = [], isRepeating: Bool = false, now: Date = .now) -> Bool {
         if stoppedGenerations.contains(generationIdentifier) { return true }
         if deletedIDs.contains(id) { return true }
         guard let reminder = current[id] else { return false }
@@ -292,7 +293,7 @@ struct PendingNudge {
         // an overdue one-shot reminder has no future replacement to accept.
         // A future primary still needs an accepted replacement before removal.
         let nagsStopped = reminder.hasValidSchedule && reminder.preferences.nagMinutes == 0
-            && (index > 0 || (generation != reminder.generation && reminder.alertDate <= now))
+            && (index > 0 || (reminder.alertDate <= now && (isRepeating || generation != reminder.generation)))
         return reminder.completedAt != nil || !reminder.preferences.notifications || nagsStopped
             || (generation != reminder.generation && queuedReplacement.contains(id))
     }
@@ -352,17 +353,22 @@ struct AlertPlan {
     var alerts: [ScheduledAlert]
     var unscheduledFirstAlerts: Int
 
-    init(reminders: [Reminder], now: Date, capacity: Int = AlertPlan.capacity) {
+    init(reminders: [Reminder], now: Date, capacity: Int = AlertPlan.capacity,
+         repeatingMinuteIDs: Set<UUID> = []) {
         let first = reminders.compactMap { reminder -> ScheduledAlert? in
             guard reminder.hasValidSchedule, reminder.completedAt == nil, reminder.preferences.notifications else { return nil }
             let start = reminder.alertDate
             let interval = TimeInterval(reminder.preferences.nagMinutes * 60)
-            if start > now { return ScheduledAlert(reminder: reminder, index: 0, date: start) }
+            let repeats = reminder.preferences.nagMinutes == 1 && repeatingMinuteIDs.contains(reminder.id)
+            if start > now {
+                return ScheduledAlert(reminder: reminder, index: 0, date: start, repeatsEveryMinute: repeats)
+            }
             guard interval > 0 else { return nil }
             guard let elapsed = Int(exactly: (now.timeIntervalSince(start) / interval).rounded(.down)),
                   elapsed < Int.max - AlertPlan.capacity else { return nil }
             let index = elapsed + 1
-            return ScheduledAlert(reminder: reminder, index: index, date: start.addingTimeInterval(Double(index) * interval))
+            return ScheduledAlert(reminder: reminder, index: repeats ? 0 : index,
+                                  date: start.addingTimeInterval(Double(index) * interval), repeatsEveryMinute: repeats)
         }.sorted { $0.date == $1.date ? $0.identifier < $1.identifier : $0.date < $1.date }
 
         alerts = Array(first.prefix(capacity))
@@ -382,7 +388,7 @@ struct AlertPlan {
 
     private static func followingAlert(after alert: ScheduledAlert) -> ScheduledAlert? {
         let minutes = alert.reminder.preferences.nagMinutes
-        guard minutes > 0 else { return nil }
+        guard minutes > 0, !alert.repeatsEveryMinute else { return nil }
         return ScheduledAlert(reminder: alert.reminder, index: alert.index + 1,
                               date: alert.date.addingTimeInterval(TimeInterval(minutes * 60)))
     }

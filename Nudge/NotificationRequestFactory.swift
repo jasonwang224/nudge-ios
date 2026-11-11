@@ -1,12 +1,54 @@
 import Foundation
+#if os(iOS)
+import ObjectiveC
+#endif
 import UserNotifications
 
 enum NotificationRequestFactory {
     static let category = "NUDGE_REMINDER"
 
-    static func make(for alert: ScheduledAlert, soundOnlyEnabled: Bool, now: Date = .now) -> UNNotificationRequest {
+    // UIKit's legacy local notifications use this trigger internally. Building
+    // the trigger directly lets the app keep its own request identifier and actions.
+    #if os(iOS)
+    private typealias LegacyTriggerFactory = @convention(c) (
+        AnyObject, Selector, NSDate, NSTimeZone?, UInt64, NSCalendar?
+    ) -> Unmanaged<AnyObject>?
+    private static let legacyTriggerClass = NSClassFromString("UNLegacyNotificationTrigger")
+    private static let legacyTriggerSelector = NSSelectorFromString("triggerWithDate:timeZone:repeatInterval:repeatCalendar:")
+    private static let legacyTriggerMethod: Method? = {
+        guard let type = legacyTriggerClass,
+              let method = class_getClassMethod(type, legacyTriggerSelector),
+              method_getNumberOfArguments(method) == 6 else { return nil }
+        return method
+    }()
+    #endif
+
+    static var supportsMinuteRepeats: Bool {
+        #if os(iOS)
+        legacyTriggerMethod != nil
+        #else
+        false
+        #endif
+    }
+
+    static func minuteRepeatTrigger(firstFire: Date) -> UNNotificationTrigger? {
+        #if os(iOS)
+        guard let type = legacyTriggerClass, let method = legacyTriggerMethod else { return nil }
+        let makeTrigger = unsafeBitCast(method_getImplementation(method), to: LegacyTriggerFactory.self)
+        let result = makeTrigger(type as AnyObject, legacyTriggerSelector, firstFire as NSDate,
+                                 nil, UInt64(NSCalendar.Unit.minute.rawValue), nil)
+        guard let trigger = result?.takeUnretainedValue() as? UNNotificationTrigger,
+              trigger.repeats else { return nil }
+        return trigger
+        #else
+        return nil
+        #endif
+    }
+
+    static func make(for alert: ScheduledAlert, soundOnlyEnabled: Bool, now: Date = .now,
+                     triggerOverride: UNNotificationTrigger? = nil) -> UNNotificationRequest {
         let reminder = alert.reminder
-        let soundOnly = NagDelivery.isSoundOnly(alert, enabled: soundOnlyEnabled)
+        let soundOnly = triggerOverride?.repeats != true && NagDelivery.isSoundOnly(alert, enabled: soundOnlyEnabled)
         let content = UNMutableNotificationContent()
         if !soundOnly {
             content.title = reminder.title
@@ -24,7 +66,9 @@ enum NotificationRequestFactory {
             content.sound = UNNotificationSound(named: UNNotificationSoundName(rawValue: name))
         }
         let trigger: UNNotificationTrigger
-        if alert.index == 0 && reminder.phoneSchedule != nil && reminder.snoozedUntil == nil && reminder.adjustedDue == nil {
+        if let triggerOverride {
+            trigger = triggerOverride
+        } else if alert.index == 0 && reminder.phoneSchedule != nil && reminder.snoozedUntil == nil && reminder.adjustedDue == nil {
             let parts = Calendar.autoupdatingCurrent.dateComponents(
                 [.era, .year, .month, .day, .hour, .minute, .second], from: alert.date
             )

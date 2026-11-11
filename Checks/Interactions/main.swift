@@ -46,7 +46,38 @@ for rule in RepeatRule.allCases {
         }
     }
 }
-precondition(combinations == 686 && !NagDelivery.enabled)
+precondition(combinations == 784 && !NagDelivery.enabled)
+
+var minutePreferences = ReminderPreferences()
+minutePreferences.nagMinutes = 1
+let minuteReminder = Reminder(title: "Minute repeat", notes: "Visible", due: due,
+                              repeatAnchor: due, preferences: minutePreferences)
+let minutePlan = AlertPlan(reminders: [minuteReminder], now: now, repeatingMinuteIDs: [minuteReminder.id])
+precondition(minutePlan.alerts.count == 1 && minutePlan.alerts[0].repeatsEveryMinute)
+let firstMinute = minutePlan.alerts[0]
+precondition(firstMinute.index == 0 && firstMinute.date == due)
+let overdueMinute = AlertPlan(reminders: [minuteReminder], now: due.addingTimeInterval(61),
+                              repeatingMinuteIDs: [minuteReminder.id]).alerts[0]
+precondition(overdueMinute.identifier == firstMinute.identifier && overdueMinute.date == due.addingTimeInterval(120))
+let repeatTrigger = UNTimeIntervalNotificationTrigger(timeInterval: 60, repeats: true)
+let minuteRequest = NotificationRequestFactory.make(for: firstMinute, soundOnlyEnabled: false, now: now,
+                                                     triggerOverride: repeatTrigger)
+precondition(minuteRequest.identifier == firstMinute.identifier && minuteRequest.trigger?.repeats == true)
+precondition(minuteRequest.content.title == minuteReminder.title
+             && minuteRequest.content.categoryIdentifier == NotificationRequestFactory.category)
+let pause = ReminderLifecycle.snoozing(minuteReminder, in: ReminderSnapshot(reminders: [minuteReminder]), now: due)!
+let snoozedMinute = AlertPlan(reminders: pause.snapshot.reminders, now: due,
+                             repeatingMinuteIDs: [minuteReminder.id]).alerts[0]
+precondition(snoozedMinute.date == due.addingTimeInterval(900) && snoozedMinute.identifier != firstMinute.identifier)
+var stoppedMinute = minuteReminder
+stoppedMinute.preferences.nagMinutes = 0
+let pendingMinute = PendingNudge(firstMinute.identifier)!
+precondition(!pendingMinute.canRetire(current: [stoppedMinute.id: stoppedMinute], deletedIDs: [],
+                                      queuedReplacement: [], isRepeating: true, now: now))
+precondition(pendingMinute.canRetire(current: [stoppedMinute.id: stoppedMinute], deletedIDs: [],
+                                     queuedReplacement: [], isRepeating: true, now: due))
+let minuteFallback = AlertPlan(reminders: [minuteReminder], now: now, capacity: 3)
+precondition(minuteFallback.alerts.count == 3 && minuteFallback.alerts.allSatisfy { !$0.repeatsEveryMinute })
 precondition(AlertSound(rawValue: "Glass")?.fileName == "Glass.wav")
 precondition(AlertSound(rawValue: "Digital Glass")?.fileName == "DigitalGlass.wav")
 

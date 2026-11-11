@@ -33,6 +33,7 @@ final class ReminderStore: ObservableObject {
     private var syncTask: Task<Void, Never>?
     private var syncRevision = 0
     private var permissionRequestedByUser = false
+    private var canQueueMinuteRepeats = NotificationRequestFactory.supportsMinuteRepeats
 
     private init() {
         let disk = UserDefaults.standard
@@ -285,9 +286,12 @@ final class ReminderStore: ObservableObject {
         // is enabled again outside the app. Never infer a stop from missing data.
         guard loadDatabase() else { return }
         let currentBeforeScheduling = Dictionary(uniqueKeysWithValues: reminders.map { ($0.id, $0) })
-        let explicitStops = requests.compactMap { PendingNudge($0.identifier) }.filter {
-            $0.canRetire(current: currentBeforeScheduling, deletedIDs: snapshot.deletedIDs, queuedReplacement: [],
-                         stoppedGenerations: snapshot.stoppedNotificationGenerations ?? [])
+        let explicitStops = requests.filter { request in
+            PendingNudge(request.identifier)?.canRetire(
+                current: currentBeforeScheduling, deletedIDs: snapshot.deletedIDs, queuedReplacement: [],
+                stoppedGenerations: snapshot.stoppedNotificationGenerations ?? [],
+                isRepeating: request.trigger?.repeats == true
+            ) == true
         }.map(\.identifier)
         if !explicitStops.isEmpty {
             center.removePendingNotificationRequests(withIdentifiers: explicitStops)
@@ -306,37 +310,59 @@ final class ReminderStore: ObservableObject {
         requests = await center.pendingNotificationRequests()
         guard revision == syncRevision else { return }
 
-        let plan = AlertPlan(reminders: reminders, now: .now)
-        let desired = Set(plan.alerts.map(\.identifier))
         let current = Dictionary(uniqueKeysWithValues: reminders.map { ($0.id, $0) })
+        var repeatingRequests = Set(requests.filter { $0.trigger?.repeats == true }.map(\.identifier))
         var pending = requests.compactMap { PendingNudge($0.identifier) }
+        let minuteReminders = reminders.filter {
+            $0.preferences.nagMinutes == 1 && $0.preferences.notifications && $0.hasValidSchedule && $0.completedAt == nil
+        }
+        let repeatingMinuteIDs = Set(minuteReminders.filter { reminder in
+            canQueueMinuteRepeats || repeatingRequests.contains(
+                ScheduledAlert(reminder: reminder, index: 0, date: reminder.alertDate).identifier
+            )
+        }.map(\.id))
+        let plan = AlertPlan(reminders: reminders, now: .now, repeatingMinuteIDs: repeatingMinuteIDs)
+        let desired = Set(plan.alerts.map(\.identifier))
         let otherCount = requests.count - pending.count
         var retained = Set(pending.map(\.identifier))
         var replacements = Set(plan.alerts.lazy.filter { retained.contains($0.identifier) }.map(\.reminder.id))
 
         func retireSuperseded() {
-            let removed = Set(pending.filter {
-                $0.canRetire(current: current, deletedIDs: snapshot.deletedIDs, queuedReplacement: replacements,
-                             stoppedGenerations: snapshot.stoppedNotificationGenerations ?? [])
+            let removed = Set(pending.filter { request in
+                if request.canRetire(current: current, deletedIDs: snapshot.deletedIDs, queuedReplacement: replacements,
+                                     stoppedGenerations: snapshot.stoppedNotificationGenerations ?? [],
+                                     isRepeating: repeatingRequests.contains(request.identifier)) { return true }
+                // Retire fallback one-shots only after this generation's repeat is accepted.
+                return request.index > 0 && repeatingMinuteIDs.contains(request.id)
+                    && current[request.id]?.generation == request.generation
+                    && repeatingRequests.contains("\(ScheduledAlert.prefix)\(request.generationIdentifier).0")
             }.map(\.identifier))
             guard !removed.isEmpty else { return }
             center.removePendingNotificationRequests(withIdentifiers: Array(removed))
             pending.removeAll { removed.contains($0.identifier) }
             retained.subtract(removed)
+            repeatingRequests.subtract(removed)
         }
         retireSuperseded()
 
         var failure = !rewritesSucceeded
         for alert in plan.alerts {
             guard revision == syncRevision else { return }
-            guard !retained.contains(alert.identifier) else { continue }
+            let replacing = retained.contains(alert.identifier)
+            guard !replacing || (alert.repeatsEveryMinute && !repeatingRequests.contains(alert.identifier)) else { continue }
+            let trigger = alert.repeatsEveryMinute ? NotificationRequestFactory.minuteRepeatTrigger(firstFire: alert.date) : nil
+            if alert.repeatsEveryMinute && trigger == nil {
+                canQueueMinuteRepeats = false
+                enqueueSync()
+                return
+            }
             // A one-slot swap gives iOS the replacement before retiring the old
             // generation. When adding a new reminder, only shed a redundant nag.
             let count = pending.count + otherCount
             let canSwap = count == AlertPlan.capacity && pending.contains {
                 $0.id == alert.reminder.id && $0.generation != alert.reminder.generation
             }
-            if count >= AlertPlan.capacity && !canSwap {
+            if !replacing && count >= AlertPlan.capacity && !canSwap {
                 guard let extra = PendingNudge.expendable(in: pending, current: current, desired: desired) else {
                     failure = true
                     break
@@ -352,17 +378,35 @@ final class ReminderStore: ObservableObject {
                 retained.remove(extra.identifier)
             }
             do {
-                let queued = request(for: alert)
+                let queued = request(for: alert, triggerOverride: trigger)
                 try await center.add(queued)
                 guard revision == syncRevision else { return }
+                if alert.repeatsEveryMinute {
+                    let confirmed = await center.pendingNotificationRequests().contains {
+                        $0.identifier == alert.identifier && $0.trigger?.repeats == true
+                    }
+                    guard revision == syncRevision else { return }
+                    guard confirmed else {
+                        canQueueMinuteRepeats = false
+                        enqueueSync()
+                        return
+                    }
+                    repeatingRequests.insert(alert.identifier)
+                }
                 if !NotificationRequestFactory.isSoundOnly(queued.content),
                    !recordAcceptedAnchor(queued.identifier) { failure = true; break }
             } catch {
+                guard revision == syncRevision else { return }
+                if alert.repeatsEveryMinute {
+                    canQueueMinuteRepeats = false
+                    enqueueSync()
+                    return
+                }
                 failure = true
                 break
             }
             guard revision == syncRevision, source != nil else { return }
-            if let added = PendingNudge(alert.identifier) { pending.append(added) }
+            if !replacing, let added = PendingNudge(alert.identifier) { pending.append(added) }
             retained.insert(alert.identifier)
             replacements.insert(alert.reminder.id)
             retireSuperseded()
@@ -372,6 +416,8 @@ final class ReminderStore: ObservableObject {
         guard revision == syncRevision else { return }
         if failure || plan.unscheduledFirstAlerts > 0 {
             schedulingIssue = "Some alerts could not be queued. Check your reminders before closing Nudge."
+        } else if repeatingMinuteIDs.count < minuteReminders.count {
+            schedulingIssue = "iOS couldn’t queue a repeating one-minute alert. Individual alerts are scheduled instead."
         }
         if !lockScreenEnabled {
             status = "Turn on Lock Screen alerts for Nudge in iPhone Settings."
@@ -384,14 +430,15 @@ final class ReminderStore: ObservableObject {
         }
     }
 
-    private func request(for alert: ScheduledAlert) -> UNNotificationRequest {
+    private func request(for alert: ScheduledAlert, triggerOverride: UNNotificationTrigger? = nil) -> UNNotificationRequest {
         // The first accepted alert can establish its anchor while this plan's
         // remaining alerts still contain older copies of the reminder.
         var latest = alert
         if let reminder = reminders.first(where: { $0.id == alert.reminder.id && $0.generation == alert.reminder.generation }) {
             latest.reminder = reminder
         }
-        return NotificationRequestFactory.make(for: latest, soundOnlyEnabled: soundOnlyEnabled)
+        return NotificationRequestFactory.make(for: latest, soundOnlyEnabled: soundOnlyEnabled,
+                                               triggerOverride: triggerOverride)
     }
 
     private func recordAcceptedAnchor(_ identifier: String) -> Bool {
@@ -425,7 +472,9 @@ final class ReminderStore: ObservableObject {
             }
         }
         let byID = Dictionary(uniqueKeysWithValues: requests.map { ($0.identifier, $0) })
-        let alerts = NagDelivery.rewritableAlerts(pending: requests.compactMap { PendingNudge($0.identifier) },
+        // An accepted repeat stays anchored to the date already held by iOS.
+        let oneShots = requests.filter { $0.trigger?.repeats != true }
+        let alerts = NagDelivery.rewritableAlerts(pending: oneShots.compactMap { PendingNudge($0.identifier) },
                                                  reminders: reminders, now: .now)
         var succeeded = true
         for alert in alerts {
@@ -482,7 +531,7 @@ final class ReminderStore: ObservableObject {
         func mode(_ content: UNNotificationContent) -> String {
             NotificationRequestFactory.isSoundOnly(content) ? "sound-only" : "alert"
         }
-        var lines = ["Nudge 1.1.7 (19) · iOS \(UIDevice.current.systemVersion)",
+        var lines = ["Nudge 1.1.8 (20) · iOS \(UIDevice.current.systemVersion)",
                      "Captured: \(time(.now))", "Sound-only nags: \(soundOnlyEnabled ? "ON" : "OFF")",
                      "Pending API records: \(pending.count) · Delivered API records: \(delivered.count)",
                      "API records are not a count of visible Lock Screen cards. Check the screen directly.",

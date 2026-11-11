@@ -2,11 +2,15 @@
 
 [Back to Nudge](../README.md)
 
-This document preserves the build instructions, audit notes, and development history from the original README. The current release is 1.1.7 (19). Sections explicitly labeled as experiments describe older builds and are not instructions for the current app.
+This document preserves the build instructions, audit notes, and development history from the original README. The current release is 1.1.8 (20). Sections explicitly labeled as experiments describe older builds and are not instructions for the current app.
 
 Native SwiftUI reminder app for the iPhone 11 Pro on iOS 17.4.1. The deployment target is iOS 17.4.
 
-On a Mac with Xcode, run `bash scripts/build-ipa.sh`. GitHub Actions runs the same script on macOS, checking agenda/calendar behavior, notifications, and database safeguards before building. Download the **Nudge-1.1.7-Unsigned** artifact and extract the IPA. Use a sideloading tool to sign it with a provisioning profile for your iPhone. This is build 19, using the existing `com.jasonwang224.nudge` identifier. Install over the existing app with the same signing account and app identifier to retain its reminders, then open the app once to refresh queued notifications.
+On a Mac with Xcode, run `bash scripts/build-ipa.sh`. GitHub Actions runs the same script on macOS, checking agenda/calendar behavior, notifications, and database safeguards before building. Download the **Nudge-1.1.8-Unsigned** artifact and extract the IPA. Use a sideloading tool to sign it with a provisioning profile for your iPhone. This is build 20, using the existing `com.jasonwang224.nudge` identifier. Install over the existing app with the same signing account and app identifier to retain its reminders, then open the app once to refresh queued notifications.
+
+## Version 1.1.8 (20)
+
+The **1 min** Nag Me option tests an iOS legacy repeating trigger with one request identifier per reminder occurrence. The app verifies that iOS accepted a repeating request and falls back to individual alerts if needed. Confirm card reuse on the iOS 17.4.1 Lock Screen before relying on it.
 
 ## Version 1.1.6 (18)
 

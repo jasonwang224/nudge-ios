@@ -178,6 +178,7 @@ struct PreferenceFields: View {
     private var nagHelp: String {
         if !preferences.notifications { return "Turn on notifications to receive nudges." }
         if preferences.nagMinutes == 0 { return "One notification, with no follow-up nudges." }
+        if preferences.nagMinutes == 1 { return "Tests a single repeating Lock Screen alert. Snooze pauses it for 15 minutes." }
         return "Repeat every \(preferences.nagMinutes) minutes. Snooze pauses nudges for 15 minutes."
     }
 
