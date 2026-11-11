@@ -12,7 +12,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         let snooze = UNNotificationAction(identifier: ReminderStore.snoozeAction, title: "Snooze 15 min", options: [])
         center.setNotificationCategories([
             UNNotificationCategory(identifier: ReminderStore.category,
-                                   actions: [done, snooze], intentIdentifiers: [], options: [])
+                                   actions: [snooze, done], intentIdentifiers: [], options: [])
         ])
         return true
     }

@@ -74,9 +74,9 @@ Tap the alert itself to open the reminder’s time menu.
 
 ## Get Nudge
 
-**Current test build: 1.1.6 (18).** Built for iOS 17.4 and later, with testing centered on the iPhone 11 Pro running iOS 17.4.1.
+**Current test build: 1.1.7 (19).** Built for iOS 17.4 and later, with testing centered on the iPhone 11 Pro running iOS 17.4.1.
 
-1. Open the latest successful run in [Build Nudge IPA](https://github.com/jasonwang224/nudge-ios/actions/workflows/ipa.yml) and download **Nudge-1.1.6-Unsigned** from **Artifacts**. Extract the ZIP to find the IPA. GitHub sign-in and repository access are required. Artifacts are time-limited.
+1. Open the latest successful run in [Build Nudge IPA](https://github.com/jasonwang224/nudge-ios/actions/workflows/ipa.yml) and download **Nudge-1.1.7-Unsigned** from **Artifacts**. Extract the ZIP to find the IPA. GitHub sign-in and repository access are required. Artifacts are time-limited.
 2. Sign and install the IPA with your preferred sideloading tool. This is an unsigned test build, not an App Store download.
 3. Open Nudge, allow notifications, and enable Lock Screen alerts and Sounds in iPhone Settings. Set your defaults and add your first reminder.
 
