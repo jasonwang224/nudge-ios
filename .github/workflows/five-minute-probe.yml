@@ -1,0 +1,23 @@
+name: Build isolated five-minute nag probe
+
+on:
+  push:
+    branches: [build/five-minute-probe]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and verify isolated iPhone probe
+        run: bash Checks/FiveMinuteProbe/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Five-Minute-Probe-1.0-Unsigned
+          path: artifacts/Five-Minute-Probe-1.0-Unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
