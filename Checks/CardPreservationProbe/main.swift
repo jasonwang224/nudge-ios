@@ -76,6 +76,18 @@ private enum Bridge {
 }
 
 private extension Bridge {
+    // Public nextTriggerDate is exposed on concrete public trigger classes, not the base class.
+    // Legacy hourly estimates use the same local minute/second pattern used by this probe.
+    // This is a near-due guard, not proof of the server's delivery timing or DST behavior.
+    static func estimatedNext(_ trigger: UNNotificationTrigger?) -> Date? {
+        if let calendar = trigger as? UNCalendarNotificationTrigger { return calendar.nextTriggerDate() }
+        guard unit(trigger) == UInt64(NSCalendar.Unit.hour.rawValue), let first = firstDate(trigger) else { return nil }
+        let now = Date.now
+        if first > now { return first }
+        return Calendar.current.nextDate(after: now,
+            matching: Calendar.current.dateComponents([.minute, .second], from: first),
+            matchingPolicy: .nextTime, repeatedTimePolicy: .first, direction: .forward)
+    }
     typealias ContentSetter = @convention(c) (AnyObject, Selector, NSString, UNNotificationContent, Reply) -> Void
     static let contentSelector = NSSelectorFromString("replaceContentForRequestWithIdentifier:replacementContent:completionHandler:")
     static var canProtect: Bool {
@@ -295,10 +307,10 @@ private func schedulesMatch(_ actual: [UNNotificationRequest], _ expected: [UNNo
                   trigger is UNCalendarNotificationTrigger || Bridge.firstDate(trigger) != nil else {
                 throw ProbeError(message: "Unsupported trigger in schedule.")
             }
-            if let next = trigger.nextTriggerDate(), next.timeIntervalSinceNow < 30 {
+            if let next = Bridge.estimatedNext(trigger), next.timeIntervalSinceNow < 30 {
                 throw ProbeError(message: "An alert is due within 30 seconds. Let it arrive, then try again.")
             }
-            if !trigger.repeats && trigger.nextTriggerDate() == nil {
+            if !trigger.repeats && Bridge.estimatedNext(trigger) == nil {
                 throw ProbeError(message: "A saved one-time alert is overdue. Reset this isolated test; do not silently replay it.")
             }
         }
@@ -431,7 +443,7 @@ private func schedulesMatch(_ actual: [UNNotificationRequest], _ expected: [UNNo
             lines.append("DELIVERED \(card.request.content.title) | \(card.date.formatted()) | trigger \(card.request.trigger.map { String(describing: type(of: $0)) } ?? "EMPTY (protected)") | \(card.request.identifier)")
         }
         for request in pending.sorted(by: { $0.identifier < $1.identifier }) {
-            lines.append("PENDING \(request.content.title) | phase \(request.content.userInfo["phase"] ?? "-") | next \(request.trigger?.nextTriggerDate()?.formatted() ?? "none") | first \(Bridge.firstDate(request.trigger)?.formatted() ?? "n/a") | repeats \(request.trigger?.repeats == true) | \(request.identifier)")
+            lines.append("PENDING \(request.content.title) | phase \(request.content.userInfo["phase"] ?? "-") | estimated next \(Bridge.estimatedNext(request.trigger)?.formatted() ?? "none") | first \(Bridge.firstDate(request.trigger)?.formatted() ?? "n/a") | repeats \(request.trigger?.repeats == true) | \(request.identifier)")
         }
         details = (lines + ["TRANSACTION LOG", log]).joined(separator: "\n\n")
     }
@@ -508,4 +520,5 @@ private final class ProbeDelegate: NSObject, UIApplicationDelegate, UNUserNotifi
         }
     }
 }
+
 
