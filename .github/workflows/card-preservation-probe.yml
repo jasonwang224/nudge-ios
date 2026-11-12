@@ -1,0 +1,22 @@
+name: Build isolated card preservation probe
+on:
+  push:
+    branches: [build/card-preservation-probe]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate and compile isolated iPhone probe
+        run: bash Checks/CardPreservationProbe/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Card-Guard-Probe-1.0-Unsigned
+          path: |
+            artifacts/Card-Guard-Probe-1.0-Unsigned.ipa
+            Checks/CardPreservationProbe/README.md
+          if-no-files-found: error
+          retention-days: 14
