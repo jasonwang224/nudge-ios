@@ -75,3 +75,38 @@ struct ReminderDatabase {
         return .file(snapshot)
     }
 }
+
+
+// Portable backup contains reminders only, never deletion/cancellation bookkeeping.
+struct ReminderBackup: Codable {
+    let format: String
+    let version: Int
+    let reminders: [Reminder]
+
+    init(snapshot: ReminderSnapshot) {
+        format = "reminder-backup"
+        version = 1
+        reminders = snapshot.reminders
+    }
+
+    static func decode(_ data: Data) throws -> Self {
+        guard data.count <= 10_000_000 else { throw ReminderDatabase.Problem.invalid }
+        let backup = try JSONDecoder().decode(Self.self, from: data)
+        guard backup.format == "reminder-backup", backup.version == 1,
+              backup.reminders.count <= 10_000 else { throw ReminderDatabase.Problem.invalid }
+        _ = try ReminderSnapshot(reminders: backup.reminders).validated()
+        return backup
+    }
+
+    func merging(into current: ReminderSnapshot) throws -> ReminderSnapshot {
+        _ = try ReminderSnapshot(reminders: reminders).validated()
+        var merged = current
+        let known = Set(current.reminders.map(\.id)).union(current.deletedIDs)
+        merged.reminders += reminders.filter { !known.contains($0.id) }.map {
+            var copy = $0
+            copy.generation = UUID()
+            return copy
+        }
+        return try merged.validated()
+    }
+}

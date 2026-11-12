@@ -57,6 +57,28 @@ final class ReminderStore: ObservableObject {
         }
     }
 
+    func exportBackup() throws -> Data {
+        guard loadDatabase() else { throw ReminderDatabase.Problem.missing }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(ReminderBackup(snapshot: snapshot))
+        _ = try ReminderBackup.decode(data)
+        return data
+    }
+
+    func importBackup(_ backup: ReminderBackup) -> String {
+        guard loadDatabase() else { return storageIssue ?? Self.storageUnavailable }
+        do {
+            let merged = try backup.merging(into: snapshot)
+            let added = merged.reminders.count - snapshot.reminders.count
+            guard added > 0 else { return "No new reminders to import. Existing and previously deleted reminders were skipped." }
+            if let error = commit(merged) { return error }
+            return "Imported \(added) reminders. Skipped \(backup.reminders.count - added) existing or previously deleted reminders."
+        } catch {
+            return "This backup could not be imported. Your reminders were kept."
+        }
+    }
+
     func delete(_ reminder: Reminder) {
         guard let change = ReminderLifecycle.deleting(reminder, in: snapshot) else { return }
         commit(change.snapshot, retiring: change.retiring)
@@ -531,7 +553,7 @@ final class ReminderStore: ObservableObject {
         func mode(_ content: UNNotificationContent) -> String {
             NotificationRequestFactory.isSoundOnly(content) ? "sound-only" : "alert"
         }
-        var lines = ["Nudge 1.1.8 (20) · iOS \(UIDevice.current.systemVersion)",
+        var lines = ["Nudge 1.1.9 (20) · iOS \(UIDevice.current.systemVersion)",
                      "Captured: \(time(.now))", "Sound-only nags: \(soundOnlyEnabled ? "ON" : "OFF")",
                      "Pending API records: \(pending.count) · Delivered API records: \(delivered.count)",
                      "API records are not a count of visible Lock Screen cards. Check the screen directly.",

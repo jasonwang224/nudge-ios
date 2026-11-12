@@ -420,3 +420,38 @@ checkSoundOnlyRequests()
 checkSoundOnlyAnchorsAndIsolation()
 checkSoundOnlyCleanup()
 try checkSoundOnlyDatabaseCompatibility()
+
+
+// Backup round trips and imports must not overwrite live records or tombstones.
+do {
+    let date = Date(timeIntervalSince1970: 2_000_000_000)
+    let item = Reminder(title: "Backup check", notes: "Preserve notes", due: date,
+                        repeatAnchor: date, preferences: ReminderPreferences())
+    let original = ReminderSnapshot(reminders: [item])
+    let bytes = try JSONEncoder().encode(ReminderBackup(snapshot: original))
+    let backup = try ReminderBackup.decode(bytes)
+    let emptyImport = try backup.merging(into: ReminderSnapshot())
+    precondition(emptyImport.reminders.count == 1)
+    precondition(emptyImport.reminders[0].id == item.id)
+    precondition(emptyImport.reminders[0].generation != item.generation)
+    let secondImport = try backup.merging(into: emptyImport)
+    precondition(secondImport == emptyImport)
+    var edited = item
+    edited.title = "Keep current edit"
+    let live = ReminderSnapshot(reminders: [edited])
+    let preserved = try backup.merging(into: live)
+    precondition(preserved == live)
+    let deleted = ReminderSnapshot(deletedIDs: [item.id])
+    let skipped = try backup.merging(into: deleted)
+    precondition(skipped == deleted)
+    let duplicate = ReminderBackup(snapshot: ReminderSnapshot(reminders: [item, item]))
+    do {
+        _ = try ReminderBackup.decode(JSONEncoder().encode(duplicate))
+        fatalError("Duplicate backup IDs must fail validation")
+    } catch {}
+    do {
+        _ = try ReminderBackup.decode(Data("{}".utf8))
+        fatalError("Invalid backup must be rejected")
+    } catch {}
+    print("Backup round-trip, merge, duplicate and invalid-file checks passed.")
+} catch { fatalError("Backup checks failed: \(error)") }
