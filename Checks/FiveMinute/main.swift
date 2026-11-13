@@ -45,9 +45,11 @@ precondition(FiveMinuteSchedule.matches(decoded, full), "Recovery must retain du
 // generation while daily recurrence survives. Allocation must use the new state.
 var daily = five[0]; daily.preferences.repeatRule = .daily
 let snapshot = ReminderSnapshot(reminders: [daily, five[1]])
-let snoozed = ReminderLifecycle.snoozing(daily, in: snapshot, now: now)!.snapshot
+let actionTime = daily.due.addingTimeInterval(1)
+precondition(ReminderLifecycle.snoozing(daily, in: snapshot, now: now) == nil, "A future reminder cannot be snoozed before it fires")
+let snoozed = ReminderLifecycle.snoozing(daily, in: snapshot, now: actionTime)!.snapshot
 let paused = snoozed.reminders.first { $0.id == daily.id }!
-precondition(paused.generation != daily.generation && paused.alertDate == now.addingTimeInterval(900))
+precondition(paused.generation != daily.generation && paused.alertDate == actionTime.addingTimeInterval(900))
 let done = ReminderLifecycle.completing(daily, in: snapshot, now: daily.due.addingTimeInterval(1))!.snapshot
 precondition(done.reminders.contains { $0.id == daily.id && $0.generation != daily.generation && $0.due > daily.due })
 precondition(done.reminders.contains { $0 == five[1] })

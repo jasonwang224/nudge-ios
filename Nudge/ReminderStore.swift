@@ -105,6 +105,11 @@ final class ReminderStore: ObservableObject {
             status = message
             return
         }
+        if PreservedNotificationSchedule.inProgress {
+            await waitForCurrentSync()
+            await done(reminder, now: now, animation: animation)
+            return
+        }
         guard commit(change.snapshot, retiring: change.retiring, animation: animation) == nil else { return }
         let oldCards = delivered.compactMap { item -> String? in
             guard let request = PendingNudge(item.request.identifier), request.id == reminder.id,
@@ -584,11 +589,12 @@ final class ReminderStore: ObservableObject {
                 // Install that first alert normally, then arm the repeat phases
                 // after delivery. Both use the same action/card identifier.
                 let imminent = desired.filter { candidate in
-                    candidate.content.userInfo[FiveMinuteSchedule.phaseKey] as? Int == 0
+                    (candidate.content.userInfo[FiveMinuteSchedule.phaseKey] as? Int == 0 || candidate.trigger?.repeats == false)
                         && !requests.contains(where: { old in old.identifier == candidate.identifier })
                 }
                 for first in imminent {
-                    guard let date = PreservedNotificationSchedule.firstDate(first.trigger),
+                    let planned = (first.content.userInfo[NagDelivery.scheduledKey] as? Double).map(Date.init(timeIntervalSince1970:))
+                    guard let date = PreservedNotificationSchedule.firstDate(first.trigger) ?? planned,
                           date > .now, date.timeIntervalSinceNow < 8 else { continue }
                     let content = first.content.mutableCopy() as! UNMutableNotificationContent
                     content.userInfo.removeValue(forKey: FiveMinuteSchedule.phaseKey)
