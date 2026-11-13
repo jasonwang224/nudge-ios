@@ -21,14 +21,15 @@ precondition(HourlyNagAllocation(reminders: five, now: now, capacity: 5, existin
 var completed = five[0]; completed.completedAt = now
 var disabled = five[1]; disabled.preferences.notifications = false
 precondition(HourlyNagAllocation(reminders: [completed, disabled], now: now, capacity: 60, existingIDs: []).repeatingIDs.isEmpty)
-let unsupported = [0, 1, 2, 20].map { reminder($0, minutes: $0) }
+let unsupported = [0, 1].map { reminder($0, minutes: $0) }
 precondition(HourlyNagAllocation(reminders: unsupported, now: now, capacity: 60, existingIDs: []).repeatingIDs.isEmpty)
 
-func phase(_ index: Int, id: String = "group") -> UNNotificationRequest {
+func phase(_ index: Int, id: String = "group", minutes: Int = 5) -> UNNotificationRequest {
     let c = UNMutableNotificationContent(); c.title = "Five minute"
     c.userInfo = [HourlyNagSchedule.phaseKey: index]
+    if minutes != 5 { c.userInfo[HourlyNagSchedule.minutesKey] = minutes }
     return UNNotificationRequest(identifier: id, content: c,
-        trigger: UNCalendarNotificationTrigger(dateMatching: DateComponents(minute: index * 5), repeats: true))
+        trigger: UNCalendarNotificationTrigger(dateMatching: DateComponents(minute: index * minutes), repeats: true))
 }
 let phases = (0..<12).map { phase($0) }
 precondition(HourlyNagSchedule.matches(Array(phases.reversed()), phases))
@@ -54,9 +55,9 @@ let done = ReminderLifecycle.completing(daily, in: snapshot, now: daily.due.addi
 precondition(done.reminders.contains { $0.id == daily.id && $0.generation != daily.generation && $0.due > daily.due })
 precondition(done.reminders.contains { $0 == five[1] })
 // Mixed intervals reserve their actual phase costs, not twelve slots per group.
-let intervals = [5, 10, 15, 30]
-let expectedCosts = [12, 6, 4, 2]
-let mixedIntervals = intervals.enumerated().map { reminder($0.offset + 100, minutes: $0.element) }
+let intervals = [2, 5, 10, 15, 20, 30]
+let expectedCosts = [30, 12, 6, 4, 3, 2]
+let mixedIntervals = [5, 10, 15, 30].enumerated().map { reminder($0.offset + 100, minutes: $0.element) }
 let oneOff = reminder(200, minutes: 0)
 let allFit = HourlyNagAllocation(reminders: mixedIntervals + [oneOff], now: now, capacity: 25, existingIDs: [])
 precondition(allFit.repeatingIDs.count == 4 && allFit.phaseSlots == 24 && allFit.fallbackCount == 0)
@@ -69,6 +70,36 @@ for capacity in 5...64 {
     precondition(actualCost == allocation.phaseSlots)
     precondition(actualCost + (4 - allocation.repeatingIDs.count) + 1 <= capacity)
 }
+// Two-minute groups consume thirty slots; reserve other reminders' first alerts.
+let twoA = reminder(401, minutes: 2)
+let twoB = reminder(402, minutes: 2)
+let pair = HourlyNagAllocation(reminders: [twoA, twoB], now: now, capacity: 60, existingIDs: [])
+precondition(pair.phaseSlots == 60 && pair.repeatingIDs.count == 2)
+let crowdedPair = HourlyNagAllocation(reminders: [twoA, twoB, oneOff], now: now, capacity: 60, existingIDs: [])
+precondition(crowdedPair.phaseSlots == 30 && crowdedPair.fallbackCount == 1)
+let pairAt63 = HourlyNagAllocation(reminders: [twoA, twoB] + Array(others.prefix(3)), now: now, capacity: 63, existingIDs: [])
+precondition(pairAt63.phaseSlots == 60 && pairAt63.repeatingIDs.count == 2)
+let crowdedAt63 = HourlyNagAllocation(reminders: [twoA, twoB] + Array(others.prefix(4)), now: now, capacity: 63, existingIDs: [twoB.id])
+precondition(crowdedAt63.phaseSlots == 30 && crowdedAt63.repeatingIDs == [twoB.id])
+let allIntervals = intervals.enumerated().map { reminder(500 + $0.offset, minutes: $0.element) }
+let completeMix = HourlyNagAllocation(reminders: allIntervals + [oneOff], now: now, capacity: 58, existingIDs: [])
+precondition(completeMix.repeatingIDs.count == 6 && completeMix.phaseSlots == 57)
+for capacity in 7...64 {
+    let allocated = HourlyNagAllocation(reminders: allIntervals + [oneOff], now: now, capacity: capacity, existingIDs: [allIntervals[4].id])
+    let used = allIntervals.filter { allocated.repeatingIDs.contains($0.id) }
+        .map { HourlyNagCadence(minutes: $0.preferences.nagMinutes)!.phaseCount }.reduce(0, +)
+    precondition(used == allocated.phaseSlots)
+    precondition(used + (6 - allocated.repeatingIDs.count) + 1 <= capacity)
+}
+let twoPhases = (0..<30).map { phase($0, id: "two", minutes: 2) }
+let twentyPhases = (0..<3).map { phase($0, id: "twenty", minutes: 20) }
+let newGroups = twoPhases + twentyPhases
+let newArchive = try NSKeyedArchiver.archivedData(withRootObject: newGroups, requiringSecureCoding: true)
+let restoredGroups = try NSKeyedUnarchiver.unarchivedObject(ofClasses: [NSArray.self, UNNotificationRequest.self], from: newArchive) as! [UNNotificationRequest]
+precondition(HourlyNagSchedule.matches(restoredGroups, newGroups))
+precondition(restoredGroups.filter { HourlyNagSchedule.recordedMinutes($0.content) == 2 }.count == 30)
+precondition(restoredGroups.filter { HourlyNagSchedule.recordedMinutes($0.content) == 20 }.count == 3)
+precondition(!HourlyNagSchedule.matches(Array(twoPhases.dropLast()) + twentyPhases, newGroups))
 for (minutes, cost) in zip(intervals, expectedCosts) {
     let cadence = HourlyNagCadence(minutes: minutes)!
     precondition(cadence.phaseCount == cost)
@@ -109,5 +140,5 @@ newContent.userInfo[HourlyNagSchedule.minutesKey] = 15
 precondition(HourlyNagSchedule.recordedMinutes(newContent) == 15)
 newContent.userInfo[HourlyNagSchedule.minutesKey] = "bad"
 precondition(HourlyNagSchedule.recordedMinutes(newContent) == nil)
-for invalid in [-1, 0, 1, 2, 7, 20, 60, Int.max] { precondition(HourlyNagCadence(minutes: invalid) == nil) }
-print("Hourly nag checks passed: 5/10/15/30-minute cadence, seven-day arithmetic, mixed capacity, legacy metadata, phase multiset, archive, Snooze, Done and interval edits.")
+for invalid in [-1, 0, 1, 3, 7, 60, Int.max] { precondition(HourlyNagCadence(minutes: invalid) == nil) }
+print("Hourly nag checks passed: 2/5/10/15/20/30-minute cadence, seven-day arithmetic, mixed capacity, legacy metadata, phase multiset, archive, Snooze, Done and interval edits.")

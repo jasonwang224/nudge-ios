@@ -638,11 +638,11 @@ final class ReminderStore: ObservableObject {
             if !obsoleteCards.isEmpty { center.removeDeliveredNotifications(withIdentifiers: obsoleteCards) }
             phaseRetry?.cancel(); phaseRetryCount = 0
             let continuous = allocation.repeatingIDs.count
-            deliveryStatus = "\(continuous) continuous 5/10/15/30-minute reminders. \(desired.count) scheduled entries."
+            deliveryStatus = "\(continuous) continuous 2/5/10/15/20/30-minute reminders. \(desired.count) scheduled entries."
             if allocation.fallbackCount > 0 || plan.unscheduledFirstAlerts > 0 {
                 schedulingIssue = "Notification space is limited. \(allocation.fallbackCount) reminders use a limited alert queue instead of continuous nags. \(plan.unscheduledFirstAlerts) first alerts could not fit."
             } else { schedulingIssue = nil }
-            status = schedulingIssue ?? "Alerts queued. 5/10/15/30-minute nags reuse one notification per reminder."
+            status = schedulingIssue ?? "Alerts queued. 2/5/10/15/20/30-minute nags reuse one notification per reminder."
             return true
         } catch {
             schedulingIssue = error.localizedDescription

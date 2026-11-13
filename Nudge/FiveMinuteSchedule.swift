@@ -5,7 +5,7 @@ import UserNotifications
 struct HourlyNagCadence: Equatable {
     let minutes: Int
     init?(minutes: Int) {
-        guard [5, 10, 15, 30].contains(minutes) else { return nil }
+        guard [2, 5, 10, 15, 20, 30].contains(minutes) else { return nil }
         self.minutes = minutes
     }
     var phaseCount: Int { 60 / minutes }
