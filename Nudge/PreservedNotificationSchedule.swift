@@ -106,7 +106,7 @@ import ObjectiveC
         let center = UNUserNotificationCenter.current()
         let j = Journal(original: try NSKeyedArchiver.archivedData(withRootObject: original, requiringSecureCoding: true),
                         desired: try NSKeyedArchiver.archivedData(withRootObject: desired, requiringSecureCoding: true), date: .now)
-        guard FiveMinuteSchedule.matches(try Journal.decode(j.desired), desired) else { throw Problem(message: "Notification recovery verification failed. Existing alerts were kept.") }
+        guard HourlyNagSchedule.matches(try Journal.decode(j.desired), desired) else { throw Problem(message: "Notification recovery verification failed. Existing alerts were kept.") }
         try FileManager.default.createDirectory(at: journalURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try JSONEncoder().encode(j).write(to: journalURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         // Check callbacks/readback, not a nil bulk callback alone. No global
@@ -136,7 +136,7 @@ import ObjectiveC
         }
         var matched = false
         for _ in 0..<6 {
-            if FiveMinuteSchedule.matches(await center.pendingNotificationRequests(), desired) { matched = true; break }
+            if HourlyNagSchedule.matches(await center.pendingNotificationRequests(), desired) { matched = true; break }
             try await Task.sleep(nanoseconds: 150_000_000)
         }
         guard matched else { throw Problem(message: "iOS did not retain the full schedule. Recovery is saved; keep the app open to retry.") }

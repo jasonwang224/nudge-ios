@@ -348,9 +348,9 @@ final class ReminderStore: ObservableObject {
         requests = await center.pendingNotificationRequests()
         guard revision == syncRevision else { return }
         let scheduleTask = UIApplication.shared.beginBackgroundTask(withName: "Update reminder schedule")
-        let handledFive = await reconcileFiveMinuteSchedule(requests: requests, revision: revision)
+        let handledHourly = await reconcileHourlyNagSchedule(requests: requests, revision: revision)
         if scheduleTask != .invalid { UIApplication.shared.endBackgroundTask(scheduleTask) }
-        if handledFive { return }
+        if handledHourly { return }
 
         // Upgrade accepted requests in place before capacity pruning. No cancel
         // happens first, and legacy expiry is never put on a new request.
@@ -490,13 +490,13 @@ final class ReminderStore: ObservableObject {
         }
     }
 
-    private func reconcileFiveMinuteSchedule(requests: [UNNotificationRequest], revision: Int, waits: Int = 0) async -> Bool {
-        let wantsFive = reminders.contains { $0.completedAt == nil && $0.preferences.notifications && $0.preferences.nagMinutes == 5 && $0.hasValidSchedule }
-        guard (wantsFive && PreservedNotificationSchedule.available)
-                || requests.contains(where: FiveMinuteSchedule.isPhase) || PreservedNotificationSchedule.hasJournal else { return false }
+    private func reconcileHourlyNagSchedule(requests: [UNNotificationRequest], revision: Int, waits: Int = 0) async -> Bool {
+        let wantsHourly = reminders.contains { $0.completedAt == nil && $0.preferences.notifications && HourlyNagCadence(minutes: $0.preferences.nagMinutes) != nil && $0.hasValidSchedule }
+        guard (wantsHourly && PreservedNotificationSchedule.available)
+                || requests.contains(where: HourlyNagSchedule.isPhase) || PreservedNotificationSchedule.hasJournal else { return false }
         do {
             guard PreservedNotificationSchedule.available else {
-                throw PreservedNotificationSchedule.Problem(message: "iOS cannot update the continuous five-minute schedule. Existing notifications were kept.")
+                throw PreservedNotificationSchedule.Problem(message: "iOS cannot update the continuous nag schedule. Existing notifications were kept.")
             }
             guard loadDatabase() else { return true }
             let now = Date.now
@@ -510,10 +510,10 @@ final class ReminderStore: ObservableObject {
             }
             var keys = Set<String>()
             let pool = (requests + saved).filter { request in
-                let phase = request.content.userInfo[FiveMinuteSchedule.phaseKey].map { String(describing: $0) } ?? "single"
+                let phase = request.content.userInfo[HourlyNagSchedule.phaseKey].map { String(describing: $0) } ?? "single"
                 return keys.insert(request.identifier + ":" + phase).inserted
             }
-            let grouped = Dictionary(grouping: pool.filter(FiveMinuteSchedule.isPhase), by: \.identifier)
+            let grouped = Dictionary(grouping: pool.filter(HourlyNagSchedule.isPhase), by: \.identifier)
             let existingIDs = Set(grouped.keys.compactMap { PendingNudge($0)?.id })
             let preserved = pool.filter { request in
                 guard let parsed = PendingNudge(request.identifier) else { return true }
@@ -524,17 +524,17 @@ final class ReminderStore: ObservableObject {
                 return current[parsed.id] == nil || current[parsed.id]?.hasValidSchedule == false
             }
             guard preserved.count <= AlertPlan.capacity else { throw PreservedNotificationSchedule.Problem(message: "Existing notifications fill the available schedule. They were kept.") }
-            let allocation = FiveMinuteAllocation(reminders: reminders, now: now,
+            let allocation = HourlyNagAllocation(reminders: reminders, now: now,
                 capacity: AlertPlan.capacity - preserved.count, existingIDs: existingIDs)
             let minuteIDs = Set(reminders.filter { $0.preferences.nagMinutes == 1 }.map(\.id))
             let remaining = reminders.filter { !allocation.repeatingIDs.contains($0.id) }
             let plan = AlertPlan(reminders: remaining, now: now,
-                capacity: max(0, AlertPlan.capacity - preserved.count - allocation.repeatingIDs.count * 12),
+                capacity: max(0, AlertPlan.capacity - preserved.count - allocation.phaseSlots),
                 repeatingMinuteIDs: minuteIDs)
             var desired = try preserved.map(PreservedNotificationSchedule.absolute)
             for alert in plan.alerts {
                 if alert.repeatsEveryMinute {
-                    if let existing = pool.first(where: { $0.identifier == alert.identifier && $0.trigger?.repeats == true && !FiveMinuteSchedule.isPhase($0) }) {
+                    if let existing = pool.first(where: { $0.identifier == alert.identifier && $0.trigger?.repeats == true && !HourlyNagSchedule.isPhase($0) }) {
                         desired.append(existing)
                     } else {
                         guard let trigger = NotificationRequestFactory.minuteRepeatTrigger(firstFire: alert.date) else { throw PreservedNotificationSchedule.Problem(message: "A one-minute repeating alert could not be prepared. Existing alerts were kept.") }
@@ -545,25 +545,26 @@ final class ReminderStore: ObservableObject {
                 }
             }
             for reminder in reminders where allocation.repeatingIDs.contains(reminder.id) {
+                guard let cadence = HourlyNagCadence(minutes: reminder.preferences.nagMinutes) else { continue }
                 let id = ScheduledAlert(reminder: reminder, index: 0, date: reminder.alertDate).identifier
                 let existing = grouped[id] ?? []
-                if validFiveMinuteGroup(existing, reminder: reminder) {
+                if validHourlyNagGroup(existing, reminder: reminder) {
                     desired += existing
                     continue
                 }
                 guard let first = AlertPlan(reminders: [reminder], now: now, capacity: 1).alerts.first?.date else { continue }
-                for phase in 0..<12 {
-                    let date = first.addingTimeInterval(Double(phase) * 300)
+                for (phase, date) in cadence.phaseDates(first: first).enumerated() {
                     guard let trigger = NotificationRequestFactory.hourlyRepeatTrigger(firstFire: date),
                           let retainedDate = PreservedNotificationSchedule.firstDate(trigger), abs(retainedDate.timeIntervalSince(date)) < 0.1,
                           PreservedNotificationSchedule.repeatUnit(trigger) == UInt64(NSCalendar.Unit.hour.rawValue) else {
-                        throw PreservedNotificationSchedule.Problem(message: "A five-minute phase could not be prepared. Existing alerts were kept.")
+                        throw PreservedNotificationSchedule.Problem(message: "A repeating phase could not be prepared. Existing alerts were kept.")
                     }
                     let alert = ScheduledAlert(reminder: reminder, index: 0, date: date)
                     let base = request(for: alert, triggerOverride: trigger)
                     let content = base.content.mutableCopy() as! UNMutableNotificationContent
-                    content.userInfo[FiveMinuteSchedule.phaseKey] = phase
-                    content.userInfo[FiveMinuteSchedule.anchorKey] = first.timeIntervalSince1970
+                    content.userInfo[HourlyNagSchedule.phaseKey] = phase
+                    content.userInfo[HourlyNagSchedule.minutesKey] = cadence.minutes
+                    content.userInfo[HourlyNagSchedule.anchorKey] = first.timeIntervalSince1970
                     desired.append(UNNotificationRequest(identifier: id, content: content, trigger: trigger))
                 }
             }
@@ -583,13 +584,13 @@ final class ReminderStore: ObservableObject {
             // Compare interval requests by their persisted absolute due time, not
             // nextTriggerDate(), which would restart their countdown.
             let comparable = try requests.map(PreservedNotificationSchedule.absolute)
-            if !FiveMinuteSchedule.matches(comparable, desired) || PreservedNotificationSchedule.hasJournal {
+            if !HourlyNagSchedule.matches(comparable, desired) || PreservedNotificationSchedule.hasJournal {
                 // A newly-created reminder due in the next few seconds must not
                 // miss its first alert while the preservation transaction waits.
                 // Install that first alert normally, then arm the repeat phases
                 // after delivery. Both use the same action/card identifier.
                 let imminent = desired.filter { candidate in
-                    (candidate.content.userInfo[FiveMinuteSchedule.phaseKey] as? Int == 0 || candidate.trigger?.repeats == false)
+                    (candidate.content.userInfo[HourlyNagSchedule.phaseKey] as? Int == 0 || candidate.trigger?.repeats == false)
                         && !requests.contains(where: { old in old.identifier == candidate.identifier })
                 }
                 for first in imminent {
@@ -597,8 +598,9 @@ final class ReminderStore: ObservableObject {
                     guard let date = PreservedNotificationSchedule.firstDate(first.trigger) ?? planned,
                           date > .now, date.timeIntervalSinceNow < 8 else { continue }
                     let content = first.content.mutableCopy() as! UNMutableNotificationContent
-                    content.userInfo.removeValue(forKey: FiveMinuteSchedule.phaseKey)
-                    content.userInfo.removeValue(forKey: FiveMinuteSchedule.anchorKey)
+                    content.userInfo.removeValue(forKey: HourlyNagSchedule.phaseKey)
+                    content.userInfo.removeValue(forKey: HourlyNagSchedule.anchorKey)
+                    content.userInfo.removeValue(forKey: HourlyNagSchedule.minutesKey)
                     let parts = Calendar.autoupdatingCurrent.dateComponents([.era, .year, .month, .day, .hour, .minute, .second], from: date)
                     try await center.add(UNNotificationRequest(identifier: first.identifier, content: content,
                         trigger: UNCalendarNotificationTrigger(dateMatching: parts, repeats: false)))
@@ -606,7 +608,7 @@ final class ReminderStore: ObservableObject {
                     status = schedulingIssue!
                     try await Task.sleep(nanoseconds: 3_000_000_000)
                     guard revision == syncRevision else { return true }
-                    return await reconcileFiveMinuteSchedule(requests: await center.pendingNotificationRequests(), revision: revision, waits: waits + 1)
+                    return await reconcileHourlyNagSchedule(requests: await center.pendingNotificationRequests(), revision: revision, waits: waits + 1)
                 }
                 if PreservedNotificationSchedule.nearDelivery(requests) || Date.now < PreservedNotificationSchedule.retryAfter {
                     schedulingIssue = "An alert is arriving or iOS is finishing an update. Keep the app open while the schedule is updated."
@@ -614,7 +616,7 @@ final class ReminderStore: ObservableObject {
                     if waits < 5 {
                         try await Task.sleep(nanoseconds: 3_000_000_000)
                         guard revision == syncRevision else { return true }
-                        return await reconcileFiveMinuteSchedule(requests: await center.pendingNotificationRequests(), revision: revision, waits: waits + 1)
+                        return await reconcileHourlyNagSchedule(requests: await center.pendingNotificationRequests(), revision: revision, waits: waits + 1)
                     }
                     retryPhaseSync()
                     return true
@@ -636,11 +638,11 @@ final class ReminderStore: ObservableObject {
             if !obsoleteCards.isEmpty { center.removeDeliveredNotifications(withIdentifiers: obsoleteCards) }
             phaseRetry?.cancel(); phaseRetryCount = 0
             let continuous = allocation.repeatingIDs.count
-            deliveryStatus = "\(continuous) continuous five-minute reminders. \(desired.count) scheduled entries."
+            deliveryStatus = "\(continuous) continuous 5/10/15/30-minute reminders. \(desired.count) scheduled entries."
             if allocation.fallbackCount > 0 || plan.unscheduledFirstAlerts > 0 {
-                schedulingIssue = "Notification space is limited. \(allocation.fallbackCount) five-minute reminders use a limited alert queue instead of continuous nags. \(plan.unscheduledFirstAlerts) first alerts could not fit."
+                schedulingIssue = "Notification space is limited. \(allocation.fallbackCount) reminders use a limited alert queue instead of continuous nags. \(plan.unscheduledFirstAlerts) first alerts could not fit."
             } else { schedulingIssue = nil }
-            status = schedulingIssue ?? "Alerts queued. Five-minute nags reuse one notification per reminder."
+            status = schedulingIssue ?? "Alerts queued. 5/10/15/30-minute nags reuse one notification per reminder."
             return true
         } catch {
             schedulingIssue = error.localizedDescription
@@ -651,19 +653,21 @@ final class ReminderStore: ObservableObject {
         }
     }
 
-    private func validFiveMinuteGroup(_ group: [UNNotificationRequest], reminder: Reminder) -> Bool {
-        guard group.count == 12, let anchor = group.first?.content.userInfo[FiveMinuteSchedule.anchorKey] as? Double,
+    private func validHourlyNagGroup(_ group: [UNNotificationRequest], reminder: Reminder) -> Bool {
+        guard let cadence = HourlyNagCadence(minutes: reminder.preferences.nagMinutes),
+              group.count == cadence.phaseCount, let anchor = group.first?.content.userInfo[HourlyNagSchedule.anchorKey] as? Double,
               anchor.isFinite else { return false }
         var phases = Set<Int>()
         return group.allSatisfy { request in
-            guard let phase = request.content.userInfo[FiveMinuteSchedule.phaseKey] as? Int,
-                  (0..<12).contains(phase), phases.insert(phase).inserted,
-                  request.content.userInfo[FiveMinuteSchedule.anchorKey] as? Double == anchor,
+            guard let phase = request.content.userInfo[HourlyNagSchedule.phaseKey] as? Int,
+                  (0..<cadence.phaseCount).contains(phase), phases.insert(phase).inserted,
+                  HourlyNagSchedule.recordedMinutes(request.content) == cadence.minutes,
+                  request.content.userInfo[HourlyNagSchedule.anchorKey] as? Double == anchor,
                   request.content.title == reminder.title, request.content.body == reminder.notes,
                   request.trigger?.repeats == true,
                   PreservedNotificationSchedule.repeatUnit(request.trigger) == UInt64(NSCalendar.Unit.hour.rawValue),
                   let actual = PreservedNotificationSchedule.firstDate(request.trigger) else { return false }
-            return abs(actual.timeIntervalSince1970 - (anchor + Double(phase) * 300)) < 0.1
+            return abs(actual.timeIntervalSince1970 - (anchor + Double(phase * cadence.minutes * 60))) < 0.1
         }
     }
 
@@ -775,7 +779,7 @@ final class ReminderStore: ObservableObject {
                      "Pending API records: \(pending.count) · Delivered API records: \(delivered.count)",
                      "API records are not a count of visible Lock Screen cards. Check the screen directly.",
                      "Read-only snapshot; no notification removal requested."]
-        lines.append("Five-minute phase records: \(pending.filter(FiveMinuteSchedule.isPhase).count). Recovery pending: \(PreservedNotificationSchedule.hasJournal). \(schedulingIssue ?? "")")
+        lines.append("Repeating phase records: \(pending.filter(HourlyNagSchedule.isPhase).count). Recovery pending: \(PreservedNotificationSchedule.hasJournal). \(schedulingIssue ?? "")")
         for item in delivered.sorted(by: { $0.date < $1.date }) {
             lines.append("REPORTED · \(title(item.request.content)) · \(mode(item.request.content)) · delivered \(time(item.date)) · \(item.request.identifier)")
         }
