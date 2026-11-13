@@ -34,6 +34,8 @@ final class ReminderStore: ObservableObject {
     private var syncRevision = 0
     private var permissionRequestedByUser = false
     private var canQueueMinuteRepeats = NotificationRequestFactory.supportsMinuteRepeats
+    private var phaseRetry: Task<Void, Never>?
+    private var phaseRetryCount = 0
 
     private init() {
         let disk = UserDefaults.standard
@@ -131,6 +133,13 @@ final class ReminderStore: ObservableObject {
     }
 
     func snooze(_ reminder: Reminder, now: Date = .now) {
+        if PreservedNotificationSchedule.inProgress {
+            Task { [weak self] in
+                await self?.waitForCurrentSync()
+                self?.snooze(reminder, now: now)
+            }
+            return
+        }
         guard let change = ReminderLifecycle.snoozing(reminder, in: snapshot, now: now) else { return }
         commit(change.snapshot, retiring: change.retiring)
     }
@@ -211,6 +220,12 @@ final class ReminderStore: ObservableObject {
     private func commit(_ changed: ReminderSnapshot, retiring previous: Reminder? = nil,
                         askPermission: Bool = false, refreshAlerts: Bool = true,
                         animation: Animation? = nil) -> String? {
+        guard !PreservedNotificationSchedule.inProgress else {
+            let message = "Notifications are being updated. Please try this change again in a moment."
+            schedulingIssue = message
+            status = message
+            return message
+        }
         guard let source else { return storageIssue ?? "Open Nudge and wait for your reminders to finish loading." }
         let prepared = NagDelivery.prepare(changed, replacing: snapshot, now: .now)
         do {
@@ -324,6 +339,13 @@ final class ReminderStore: ObservableObject {
         }
         // Re-read after any permission prompt. Cancellation only uses readable, committed data.
         guard loadDatabase() else { return }
+
+        requests = await center.pendingNotificationRequests()
+        guard revision == syncRevision else { return }
+        let scheduleTask = UIApplication.shared.beginBackgroundTask(withName: "Update reminder schedule")
+        let handledFive = await reconcileFiveMinuteSchedule(requests: requests, revision: revision)
+        if scheduleTask != .invalid { UIApplication.shared.endBackgroundTask(scheduleTask) }
+        if handledFive { return }
 
         // Upgrade accepted requests in place before capacity pruning. No cancel
         // happens first, and legacy expiry is never put on a new request.
@@ -452,6 +474,193 @@ final class ReminderStore: ObservableObject {
         }
     }
 
+    private func retryPhaseSync(after delay: Double = 3) {
+        guard phaseRetryCount < 6 else { return }
+        phaseRetryCount += 1
+        phaseRetry?.cancel()
+        phaseRetry = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled, let self else { return }
+            self.enqueueSync()
+        }
+    }
+
+    private func reconcileFiveMinuteSchedule(requests: [UNNotificationRequest], revision: Int, waits: Int = 0) async -> Bool {
+        let wantsFive = reminders.contains { $0.completedAt == nil && $0.preferences.notifications && $0.preferences.nagMinutes == 5 && $0.hasValidSchedule }
+        guard (wantsFive && PreservedNotificationSchedule.available)
+                || requests.contains(where: FiveMinuteSchedule.isPhase) || PreservedNotificationSchedule.hasJournal else { return false }
+        do {
+            guard PreservedNotificationSchedule.available else {
+                throw PreservedNotificationSchedule.Problem(message: "iOS cannot update the continuous five-minute schedule. Existing notifications were kept.")
+            }
+            guard loadDatabase() else { return true }
+            let now = Date.now
+            let current = Dictionary(uniqueKeysWithValues: reminders.map { ($0.id, $0) })
+            // Recovery never replays stale generations blindly. Rebuild from the
+            // readable database, using saved records only to retain accepted timing.
+            let saved = try PreservedNotificationSchedule.recoveryRequests().filter { request in
+                if request.trigger?.repeats == true { return true }
+                if let stamp = request.content.userInfo[NagDelivery.scheduledKey] as? Double { return stamp > now.timeIntervalSince1970 }
+                return true
+            }
+            var keys = Set<String>()
+            let pool = (requests + saved).filter { request in
+                let phase = request.content.userInfo[FiveMinuteSchedule.phaseKey].map { String(describing: $0) } ?? "single"
+                return keys.insert(request.identifier + ":" + phase).inserted
+            }
+            let grouped = Dictionary(grouping: pool.filter(FiveMinuteSchedule.isPhase), by: \.identifier)
+            let existingIDs = Set(grouped.keys.compactMap { PendingNudge($0)?.id })
+            let preserved = pool.filter { request in
+                guard let parsed = PendingNudge(request.identifier) else { return true }
+                if parsed.canRetire(current: current, deletedIDs: snapshot.deletedIDs, queuedReplacement: [],
+                                    stoppedGenerations: snapshot.stoppedNotificationGenerations ?? [],
+                                    isRepeating: request.trigger?.repeats == true, now: now) { return false }
+                // Missing database rows are not permission to delete notifications.
+                return current[parsed.id] == nil || current[parsed.id]?.hasValidSchedule == false
+            }
+            guard preserved.count <= AlertPlan.capacity else { throw PreservedNotificationSchedule.Problem(message: "Existing notifications fill the available schedule. They were kept.") }
+            let allocation = FiveMinuteAllocation(reminders: reminders, now: now,
+                capacity: AlertPlan.capacity - preserved.count, existingIDs: existingIDs)
+            let minuteIDs = Set(reminders.filter { $0.preferences.nagMinutes == 1 }.map(\.id))
+            let remaining = reminders.filter { !allocation.repeatingIDs.contains($0.id) }
+            let plan = AlertPlan(reminders: remaining, now: now,
+                capacity: max(0, AlertPlan.capacity - preserved.count - allocation.repeatingIDs.count * 12),
+                repeatingMinuteIDs: minuteIDs)
+            var desired = try preserved.map(PreservedNotificationSchedule.absolute)
+            for alert in plan.alerts {
+                if alert.repeatsEveryMinute {
+                    if let existing = pool.first(where: { $0.identifier == alert.identifier && $0.trigger?.repeats == true && !FiveMinuteSchedule.isPhase($0) }) {
+                        desired.append(existing)
+                    } else {
+                        guard let trigger = NotificationRequestFactory.minuteRepeatTrigger(firstFire: alert.date) else { throw PreservedNotificationSchedule.Problem(message: "A one-minute repeating alert could not be prepared. Existing alerts were kept.") }
+                        desired.append(request(for: alert, triggerOverride: trigger))
+                    }
+                } else {
+                    desired.append(try PreservedNotificationSchedule.absolute(request(for: alert)))
+                }
+            }
+            for reminder in reminders where allocation.repeatingIDs.contains(reminder.id) {
+                let id = ScheduledAlert(reminder: reminder, index: 0, date: reminder.alertDate).identifier
+                let existing = grouped[id] ?? []
+                if validFiveMinuteGroup(existing, reminder: reminder) {
+                    desired += existing
+                    continue
+                }
+                guard let first = AlertPlan(reminders: [reminder], now: now, capacity: 1).alerts.first?.date else { continue }
+                for phase in 0..<12 {
+                    let date = first.addingTimeInterval(Double(phase) * 300)
+                    guard let trigger = NotificationRequestFactory.hourlyRepeatTrigger(firstFire: date),
+                          let retainedDate = PreservedNotificationSchedule.firstDate(trigger), abs(retainedDate.timeIntervalSince(date)) < 0.1,
+                          PreservedNotificationSchedule.repeatUnit(trigger) == UInt64(NSCalendar.Unit.hour.rawValue) else {
+                        throw PreservedNotificationSchedule.Problem(message: "A five-minute phase could not be prepared. Existing alerts were kept.")
+                    }
+                    let alert = ScheduledAlert(reminder: reminder, index: 0, date: date)
+                    let base = request(for: alert, triggerOverride: trigger)
+                    let content = base.content.mutableCopy() as! UNMutableNotificationContent
+                    content.userInfo[FiveMinuteSchedule.phaseKey] = phase
+                    content.userInfo[FiveMinuteSchedule.anchorKey] = first.timeIntervalSince1970
+                    desired.append(UNNotificationRequest(identifier: id, content: content, trigger: trigger))
+                }
+            }
+            // Preserve a superseded generation if its replacement has not fit.
+            // Refuse the entire update instead of silently dropping that last alert.
+            let replacementIDs = Set(desired.compactMap { PendingNudge($0.identifier)?.id })
+            let unrepresented = pool.filter { request in
+                guard let parsed = PendingNudge(request.identifier), let reminder = current[parsed.id],
+                      reminder.generation != parsed.generation || !replacementIDs.contains(parsed.id) else { return false }
+                if request.trigger?.repeats != true,
+                   let stamp = request.content.userInfo[NagDelivery.scheduledKey] as? Double, stamp <= now.timeIntervalSince1970 { return false }
+                return !parsed.canRetire(current: current, deletedIDs: snapshot.deletedIDs, queuedReplacement: replacementIDs,
+                    stoppedGenerations: snapshot.stoppedNotificationGenerations ?? [], isRepeating: request.trigger?.repeats == true, now: now)
+            }
+            guard unrepresented.isEmpty else { throw PreservedNotificationSchedule.Problem(message: "There is not enough room for a replacement alert. The existing schedule was kept.") }
+            guard revision == syncRevision, loadDatabase() else { return true }
+            // Compare interval requests by their persisted absolute due time, not
+            // nextTriggerDate(), which would restart their countdown.
+            let comparable = try requests.map(PreservedNotificationSchedule.absolute)
+            if !FiveMinuteSchedule.matches(comparable, desired) || PreservedNotificationSchedule.hasJournal {
+                // A newly-created reminder due in the next few seconds must not
+                // miss its first alert while the preservation transaction waits.
+                // Install that first alert normally, then arm the repeat phases
+                // after delivery. Both use the same action/card identifier.
+                let imminent = desired.filter { candidate in
+                    candidate.content.userInfo[FiveMinuteSchedule.phaseKey] as? Int == 0
+                        && !requests.contains(where: { old in old.identifier == candidate.identifier })
+                }
+                for first in imminent {
+                    guard let date = PreservedNotificationSchedule.firstDate(first.trigger),
+                          date > .now, date.timeIntervalSinceNow < 8 else { continue }
+                    let content = first.content.mutableCopy() as! UNMutableNotificationContent
+                    content.userInfo.removeValue(forKey: FiveMinuteSchedule.phaseKey)
+                    content.userInfo.removeValue(forKey: FiveMinuteSchedule.anchorKey)
+                    let parts = Calendar.autoupdatingCurrent.dateComponents([.era, .year, .month, .day, .hour, .minute, .second], from: date)
+                    try await center.add(UNNotificationRequest(identifier: first.identifier, content: content,
+                        trigger: UNCalendarNotificationTrigger(dateMatching: parts, repeats: false)))
+                    schedulingIssue = "The first alert is queued. Keep the app open briefly while continuous nags are prepared."
+                    status = schedulingIssue!
+                    try await Task.sleep(nanoseconds: 3_000_000_000)
+                    guard revision == syncRevision else { return true }
+                    return await reconcileFiveMinuteSchedule(requests: await center.pendingNotificationRequests(), revision: revision, waits: waits + 1)
+                }
+                if PreservedNotificationSchedule.nearDelivery(requests) || Date.now < PreservedNotificationSchedule.retryAfter {
+                    schedulingIssue = "An alert is arriving or iOS is finishing an update. Keep the app open while the schedule is updated."
+                    status = schedulingIssue!
+                    if waits < 5 {
+                        try await Task.sleep(nanoseconds: 3_000_000_000)
+                        guard revision == syncRevision else { return true }
+                        return await reconcileFiveMinuteSchedule(requests: await center.pendingNotificationRequests(), revision: revision, waits: waits + 1)
+                    }
+                    retryPhaseSync()
+                    return true
+                }
+                try await PreservedNotificationSchedule.apply(desired, original: requests)
+            }
+            guard revision == syncRevision else { return true }
+            // Migration may leave finite-queue cards for this SAME occurrence
+            // under old numeric indices. Retire those only after the new group
+            // is confirmed. Never remove another reminder's cards here.
+            let delivered = await center.deliveredNotifications()
+            guard revision == syncRevision else { return true }
+            let obsoleteCards = delivered.compactMap { card -> String? in
+                guard let parsed = PendingNudge(card.request.identifier),
+                      allocation.repeatingIDs.contains(parsed.id), current[parsed.id]?.generation == parsed.generation,
+                      parsed.index != 0 else { return nil }
+                return parsed.identifier
+            }
+            if !obsoleteCards.isEmpty { center.removeDeliveredNotifications(withIdentifiers: obsoleteCards) }
+            phaseRetry?.cancel(); phaseRetryCount = 0
+            let continuous = allocation.repeatingIDs.count
+            deliveryStatus = "\(continuous) continuous five-minute reminders. \(desired.count) scheduled entries."
+            if allocation.fallbackCount > 0 || plan.unscheduledFirstAlerts > 0 {
+                schedulingIssue = "Notification space is limited. \(allocation.fallbackCount) five-minute reminders use a limited alert queue instead of continuous nags. \(plan.unscheduledFirstAlerts) first alerts could not fit."
+            } else { schedulingIssue = nil }
+            status = schedulingIssue ?? "Alerts queued. Five-minute nags reuse one notification per reminder."
+            return true
+        } catch {
+            schedulingIssue = error.localizedDescription
+            if PreservedNotificationSchedule.hasJournal { schedulingIssue! += " Some alerts may be paused until recovery completes." }
+            status = schedulingIssue!
+            retryPhaseSync(after: max(3, PreservedNotificationSchedule.retryAfter.timeIntervalSinceNow + 1))
+            return true
+        }
+    }
+
+    private func validFiveMinuteGroup(_ group: [UNNotificationRequest], reminder: Reminder) -> Bool {
+        guard group.count == 12, let anchor = group.first?.content.userInfo[FiveMinuteSchedule.anchorKey] as? Double,
+              anchor.isFinite else { return false }
+        var phases = Set<Int>()
+        return group.allSatisfy { request in
+            guard let phase = request.content.userInfo[FiveMinuteSchedule.phaseKey] as? Int,
+                  (0..<12).contains(phase), phases.insert(phase).inserted,
+                  request.content.userInfo[FiveMinuteSchedule.anchorKey] as? Double == anchor,
+                  request.content.title == reminder.title, request.content.body == reminder.notes,
+                  request.trigger?.repeats == true,
+                  PreservedNotificationSchedule.repeatUnit(request.trigger) == UInt64(NSCalendar.Unit.hour.rawValue),
+                  let actual = PreservedNotificationSchedule.firstDate(request.trigger) else { return false }
+            return abs(actual.timeIntervalSince1970 - (anchor + Double(phase) * 300)) < 0.1
+        }
+    }
+
     private func request(for alert: ScheduledAlert, triggerOverride: UNNotificationTrigger? = nil) -> UNNotificationRequest {
         // The first accepted alert can establish its anchor while this plan's
         // remaining alerts still contain older copies of the reminder.
@@ -493,7 +702,7 @@ final class ReminderStore: ObservableObject {
                 guard recordAcceptedAnchor(request.identifier) else { return false }
             }
         }
-        let byID = Dictionary(uniqueKeysWithValues: requests.map { ($0.identifier, $0) })
+        let byID = Dictionary(requests.map { ($0.identifier, $0) }, uniquingKeysWith: { first, _ in first })
         // An accepted repeat stays anchored to the date already held by iOS.
         let oneShots = requests.filter { $0.trigger?.repeats != true }
         let alerts = NagDelivery.rewritableAlerts(pending: oneShots.compactMap { PendingNudge($0.identifier) },
@@ -553,11 +762,14 @@ final class ReminderStore: ObservableObject {
         func mode(_ content: UNNotificationContent) -> String {
             NotificationRequestFactory.isSoundOnly(content) ? "sound-only" : "alert"
         }
-        var lines = ["Nudge 1.1.9 (20) · iOS \(UIDevice.current.systemVersion)",
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        var lines = ["App \(version) (\(build)) · iOS \(UIDevice.current.systemVersion)",
                      "Captured: \(time(.now))", "Sound-only nags: \(soundOnlyEnabled ? "ON" : "OFF")",
                      "Pending API records: \(pending.count) · Delivered API records: \(delivered.count)",
                      "API records are not a count of visible Lock Screen cards. Check the screen directly.",
                      "Read-only snapshot; no notification removal requested."]
+        lines.append("Five-minute phase records: \(pending.filter(FiveMinuteSchedule.isPhase).count). Recovery pending: \(PreservedNotificationSchedule.hasJournal). \(schedulingIssue ?? "")")
         for item in delivered.sorted(by: { $0.date < $1.date }) {
             lines.append("REPORTED · \(title(item.request.content)) · \(mode(item.request.content)) · delivered \(time(item.date)) · \(item.request.identifier)")
         }

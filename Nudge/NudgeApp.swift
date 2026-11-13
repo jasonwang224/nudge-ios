@@ -38,6 +38,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     }
 
     nonisolated static func trimDeliveredNags(in center: UNUserNotificationCenter, incoming: DeliveredNudge? = nil) async {
+        guard await MainActor.run(body: { !PreservedNotificationSchedule.inProgress }) else { return }
         let delivered = await center.deliveredNotifications()
         guard !Task.isCancelled else { return }
         let nudges = delivered.compactMap { NotificationRequestFactory.visibleNudge($0) }

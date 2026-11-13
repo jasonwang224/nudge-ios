@@ -32,11 +32,19 @@ enum NotificationRequestFactory {
     }
 
     static func minuteRepeatTrigger(firstFire: Date) -> UNNotificationTrigger? {
+        legacyRepeatTrigger(firstFire: firstFire, unit: .minute)
+    }
+
+    static func hourlyRepeatTrigger(firstFire: Date) -> UNNotificationTrigger? {
+        legacyRepeatTrigger(firstFire: firstFire, unit: .hour)
+    }
+
+    private static func legacyRepeatTrigger(firstFire: Date, unit: NSCalendar.Unit) -> UNNotificationTrigger? {
         #if os(iOS)
         guard let type = legacyTriggerClass, let method = legacyTriggerMethod else { return nil }
         let makeTrigger = unsafeBitCast(method_getImplementation(method), to: LegacyTriggerFactory.self)
         let result = makeTrigger(type as AnyObject, legacyTriggerSelector, firstFire as NSDate,
-                                 nil, UInt64(NSCalendar.Unit.minute.rawValue), nil)
+                                 nil, UInt64(unit.rawValue), nil)
         guard let trigger = result?.takeUnretainedValue() as? UNNotificationTrigger,
               trigger.repeats else { return nil }
         return trigger
