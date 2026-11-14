@@ -34,23 +34,26 @@ struct NudgeSettings: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(15)
                 .nudgePanel(palette, fill: palette.sage)
-                if store.schedulingIssue != nil {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Label("NOTIFICATION RECOVERY", systemImage: "bell.badge")
-                            .font(.caption.weight(.semibold))
-                        Text(store.schedulingIssue ?? "").font(.footnote)
+                PreferenceFields(preferences: $store.defaults, palette: palette)
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("NOTIFICATIONS", systemImage: "bell.badge")
+                        .font(.caption.weight(.semibold))
+                    if let issue = store.schedulingIssue {
+                        Text(issue).font(.footnote)
                         Button(store.isUpdatingNotifications ? "Updating alerts…" : "Retry alerts") {
                             store.retryNotifications()
                         }.disabled(store.isUpdatingNotifications)
-                        Button("Show notification details") {
-                            Task {
-                                await store.refreshNotificationDiagnostics()
-                                showingNotificationDetails = true
-                            }
+                    } else {
+                        Text("View the latest saved notification update report.")
+                            .font(.footnote).foregroundStyle(palette.secondary)
+                    }
+                    Button("Show notification details") {
+                        Task {
+                            await store.refreshNotificationDiagnostics()
+                            showingNotificationDetails = true
                         }
-                    }.padding(15).nudgePanel(palette)
-                }
-                PreferenceFields(preferences: $store.defaults, palette: palette)
+                    }
+                }.padding(15).nudgePanel(palette)
                 VStack(alignment: .leading, spacing: 12) {
                     Label("APPEARANCE", systemImage: "moon")
                         .font(.caption.weight(.semibold)).tracking(0.8)

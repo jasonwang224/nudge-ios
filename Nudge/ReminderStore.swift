@@ -26,6 +26,8 @@ final class ReminderStore: ObservableObject {
 
     static let storageUnavailable = "Nudge couldn’t open your saved reminders. Your data and queued alerts were left untouched."
     private static let defaultsKey = "Nudge.defaults.v1"
+    private static let updateLogKey = "Nudge.notificationUpdateLog.v1"
+    private var updateLog = NotificationUpdateLog()
     private let center = UNUserNotificationCenter.current()
     private let database: ReminderDatabase
     private var source: ReminderDatabase.Source?
@@ -43,6 +45,7 @@ final class ReminderStore: ObservableObject {
 
     private init() {
         let disk = UserDefaults.standard
+        updateLog = NotificationUpdateLog.decode(disk.data(forKey: Self.updateLogKey))
         database = ReminderDatabase(url: URL.applicationSupportDirectory.appending(path: "Nudge/Reminders-v1.json"),
                                     preferences: disk)
         defaults = disk.data(forKey: Self.defaultsKey)
@@ -164,6 +167,8 @@ final class ReminderStore: ObservableObject {
                              adjustment: true, syncDelay: 0.4)
         if problem == nil, let latest = snapshot.reminders.first(where: { $0.id == current.id }) {
             adjustmentSequence.record(previous: current, next: latest)
+            recordUpdate(stage: "adjustment saved", message: "\(direction) \(shift.rawValue); Nag Me \(latest.preferences.nagMinutes) min",
+                details: "reminder=\(latest.id); generation=\(latest.generation); oldEpoch=\(current.alertDate.timeIntervalSince1970); newEpoch=\(latest.alertDate.timeIntervalSince1970)")
         }
         return problem
     }
@@ -539,6 +544,8 @@ final class ReminderStore: ObservableObject {
             phaseRetry?.cancel()
             retryBudget.reset()
         }
+        recordUpdate(stage: failure ? "standard schedule failed" : "standard schedule checked",
+            message: schedulingIssue ?? "Standard notification scheduling completed.", failure: failure || plan.unscheduledFirstAlerts > 0)
         if !lockScreenEnabled {
             status = "Turn on Lock Screen alerts for Nudge in iPhone Settings."
         } else if failure || plan.unscheduledFirstAlerts > 0 {
@@ -555,6 +562,7 @@ final class ReminderStore: ObservableObject {
             schedulingIssue = "Automatic retries stopped. Your reminder changes are saved. Tap Retry alerts to try again."
                 + (PreservedNotificationSchedule.hasJournal ? " Some alerts may be paused until recovery completes." : "")
             status = schedulingIssue!
+            recordUpdate(stage: "automatic retries exhausted", message: schedulingIssue!)
             return
         }
         phaseRetry?.cancel()
@@ -569,6 +577,7 @@ final class ReminderStore: ObservableObject {
         let wantsHourly = reminders.contains { $0.completedAt == nil && $0.preferences.notifications && HourlyNagCadence(minutes: $0.preferences.nagMinutes) != nil && $0.hasValidSchedule }
         guard (wantsHourly && PreservedNotificationSchedule.available)
                 || requests.contains(where: HourlyNagSchedule.isPhase) || PreservedNotificationSchedule.hasJournal else { return false }
+        var selectedRoute = "schedule planning"
         do {
             guard PreservedNotificationSchedule.available else {
                 throw PreservedNotificationSchedule.Problem(message: "iOS cannot update the continuous nag schedule. Existing notifications were kept.")
@@ -674,12 +683,20 @@ final class ReminderStore: ObservableObject {
                     && !PreservedNotificationSchedule.inProgress && Date.now >= PreservedNotificationSchedule.retryAfter
                     ? MinuteScheduleReplacement.plan(actual: requests, desired: narrowDesired, reminders: reminders) : nil
                 if let narrowPlan {
+                    recordUpdate(stage: narrowPlan.replacementAlreadyAccepted ? "minute retirement retry" : "minute replacement", message: "Updating one reminder; pending=\(requests.count); desired=\(narrowDesired.count)")
                     // Once started, never fall through to a global rebuild on
                     // failure or supersession. The serial retry reads afresh.
+                    selectedRoute = narrowPlan.replacementAlreadyAccepted ? "minute retirement retry" : "minute replacement"
                     let outcome = try await MinuteScheduleReplacement.apply(narrowPlan, center: center,
                         isCurrent: { self.syncRevision == revision })
                     guard outcome == .applied else { return true }
                 } else {
+                    let reason = PreservedNotificationSchedule.hasJournal ? "saved recovery transaction"
+                        : PreservedNotificationSchedule.inProgress ? "update in progress"
+                        : Date.now < PreservedNotificationSchedule.retryAfter ? "callback cooldown"
+                        : "change does not qualify for a scoped minute replacement"
+                    recordUpdate(stage: "protected schedule route", message: reason,
+                        details: HourlyNagSchedule.mismatchDescription(actual: requests, expected: narrowDesired) ?? "Pending schedule already matches; recovery still needs finalization.")
                     // A newly-created reminder due in the next few seconds must not
                     // miss its first alert while the preservation transaction waits.
                     // Install that first alert normally, then arm the repeat phases
@@ -716,6 +733,7 @@ final class ReminderStore: ObservableObject {
                         retryPhaseSync()
                         return true
                     }
+                    selectedRoute = "protected schedule"
                     try await PreservedNotificationSchedule.apply(desired, original: requests)
                 }
             }
@@ -732,6 +750,7 @@ final class ReminderStore: ObservableObject {
                 return parsed.identifier
             }
             if !obsoleteCards.isEmpty { center.removeDeliveredNotifications(withIdentifiers: obsoleteCards) }
+            recordUpdate(stage: "schedule verified", message: "Pending schedule and delivered-card checks completed. Saved recovery: \(PreservedNotificationSchedule.hasJournal)")
             phaseRetry?.cancel(); retryBudget.reset()
             let continuous = allocation.repeatingIDs.count
             deliveryStatus = "\(continuous) continuous 2/5/10/15/20/30-minute reminders. \(desired.count) scheduled entries."
@@ -741,6 +760,11 @@ final class ReminderStore: ObservableObject {
             status = schedulingIssue ?? "Alerts queued. 2/5/10/15/20/30-minute nags reuse one notification per reminder."
             return true
         } catch {
+            let narrowDetails = (error as? MinuteScheduleReplacement.Problem)?.details
+            let stage = selectedRoute == "protected schedule" ? PreservedNotificationSchedule.lastAttemptStage : selectedRoute
+            recordUpdate(stage: stage, message: error.localizedDescription,
+                details: "revision=\(revision); currentRevision=\(syncRevision); recoveryPending=\(PreservedNotificationSchedule.hasJournal)\n"
+                    + (narrowDetails ?? (selectedRoute == "protected schedule" ? PreservedNotificationSchedule.latestVerificationDetails : nil) ?? "No pending-array mismatch was recorded for this stage."), failure: true)
             guard revision == syncRevision else { return true }
             schedulingIssue = error.localizedDescription
             if PreservedNotificationSchedule.hasJournal { schedulingIssue! += " Some alerts may be paused until recovery completes." }
@@ -856,6 +880,18 @@ final class ReminderStore: ObservableObject {
         if failed { deliveryStatus += " Some updates failed; keep Nudge open and check your reminders." }
     }
 
+    private func recordUpdate(stage: String, message: String, details: String = "", failure: Bool = false) {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        updateLog.record(stage: stage, message: message, details: details, failure: failure,
+                         version: "\(version) (\(build))")
+        // Diagnostic storage is separate from reminders and never changes the
+        // scheduling result. Keep the in-memory report if persistence fails.
+        if let data = try? JSONEncoder().encode(updateLog) {
+            UserDefaults.standard.set(data, forKey: Self.updateLogKey)
+        }
+    }
+
     func refreshNotificationDiagnostics() async {
         let pending = await center.pendingNotificationRequests()
         let delivered = await center.deliveredNotifications()
@@ -878,6 +914,8 @@ final class ReminderStore: ObservableObject {
                      "Read-only snapshot; no notification removal requested."]
         lines.append("Repeating phase records: \(pending.filter(HourlyNagSchedule.isPhase).count). Recovery pending: \(PreservedNotificationSchedule.hasJournal). \(schedulingIssue ?? "")")
         lines.append("Automatic retries used: \(retryBudget.attempts)/\(retryBudget.maximum). Update running: \(isUpdatingNotifications).")
+        lines.append("SAVED UPDATE HISTORY\n" + updateLog.report)
+        lines.append("CURRENT PENDING SNAPSHOT\n" + PreservedNotificationSchedule.requestDetails(pending))
         if let details = PreservedNotificationSchedule.latestVerificationDetails {
             lines.append("Last unverified schedule:\n\(details)")
         }

@@ -35,6 +35,12 @@ func renamed(_ request: UNNotificationRequest) -> UNNotificationRequest {
     return UNNotificationRequest(identifier: request.identifier, content: content, trigger: request.trigger)
 }
 
+func changingContent(_ request: UNNotificationRequest, _ edit: (UNMutableNotificationContent) -> Void) -> UNNotificationRequest {
+    let content = request.content.mutableCopy() as! UNMutableNotificationContent
+    edit(content)
+    return UNNotificationRequest(identifier: request.identifier, content: content, trigger: request.trigger)
+}
+
 let oldReminder = minuteReminder()
 let newReminder = shifted(oldReminder)
 let old = request(oldReminder)
@@ -45,7 +51,7 @@ let original = phases + [old, other]
 let desired = phases + [replacement, other]
 let basic = MinuteScheduleReplacement.plan(actual: original, desired: desired, reminders: [newReminder])!
 precondition(basic.obsolete.map(\.identifier) == [old.identifier])
-precondition(basic.preflightRemovals.isEmpty)
+precondition(basic.preflightRemovals.isEmpty && !basic.replacementAlreadyAccepted)
 precondition(HourlyNagSchedule.matches(basic.original, original))
 precondition(MinuteScheduleReplacement.plan(actual: Array(original.reversed()), desired: desired, reminders: [newReminder]) != nil)
 
@@ -80,6 +86,67 @@ let sharedPhase = UNNotificationRequest(identifier: old.identifier, content: sha
 precondition(MinuteScheduleReplacement.plan(actual: original + [sharedPhase], desired: desired + [sharedPhase], reminders: [newReminder]) == nil)
 precondition(MinuteScheduleReplacement.plan(actual: phases + [old], desired: phases + [old], reminders: [oldReminder]) == nil)
 
+// A retry of the SAME saved generation must finish retiring its old requests
+// without adding again or falling back to an app-wide schedule replacement.
+let acceptedOriginal = original + [replacement]
+let retirement = MinuteScheduleReplacement.plan(actual: acceptedOriginal, desired: desired,
+                                                reminders: [newReminder], now: testDate)!
+precondition(retirement.replacementAlreadyAccepted && retirement.preflightRemovals.isEmpty)
+precondition(retirement.obsolete.map(\.identifier) == [old.identifier])
+
+let invalidCurrentEdits: [(UNMutableNotificationContent) -> Void] = [
+    { $0.userInfo["id"] = UUID().uuidString },
+    { $0.userInfo["generation"] = oldReminder.generation.uuidString },
+    { $0.userInfo[NagDelivery.versionKey] = NagDelivery.payloadVersion - 1 },
+    { $0.userInfo[NagDelivery.titleKey] = "Wrong title" },
+    { $0.userInfo[NagDelivery.soundOnlyKey] = true },
+    { $0.userInfo.removeValue(forKey: NagDelivery.scheduledKey) },
+    { $0.userInfo[NagDelivery.scheduledKey] = Double.nan },
+    { $0.userInfo[NagDelivery.scheduledKey] = Double.infinity },
+    { $0.userInfo[NagDelivery.scheduledKey] = newReminder.alertDate.timeIntervalSince1970 - 60 },
+    { $0.userInfo[NagDelivery.scheduledKey] = newReminder.alertDate.timeIntervalSince1970 + 1 },
+    { $0.userInfo[NagDelivery.scheduledKey] = newReminder.alertDate.timeIntervalSince1970 + 60 },
+    { $0.title = "Wrong title" },
+    { $0.body = "Wrong notes" },
+    { $0.categoryIdentifier = "Wrong category" },
+    { $0.threadIdentifier = UUID().uuidString },
+    { $0.sound = nil },
+    { $0.sound = UNNotificationSound(named: UNNotificationSoundName(rawValue: "wrong.caf")) },
+    { $0.userInfo[HourlyNagSchedule.phaseKey] = 0 }
+]
+for edit in invalidCurrentEdits {
+    let corrupt = changingContent(replacement, edit)
+    precondition(MinuteScheduleReplacement.plan(actual: original + [corrupt],
+        desired: phases + [corrupt, other], reminders: [newReminder], now: testDate) == nil)
+}
+precondition(MinuteScheduleReplacement.plan(actual: acceptedOriginal + [replacement], desired: desired,
+                                           reminders: [newReminder], now: testDate) == nil)
+precondition(MinuteScheduleReplacement.plan(actual: acceptedOriginal + [old], desired: desired,
+                                           reminders: [newReminder], now: testDate) == nil)
+let wrongRepeatingTrigger = request(newReminder, interval: 300)
+precondition(MinuteScheduleReplacement.plan(actual: original + [wrongRepeatingTrigger],
+    desired: phases + [wrongRepeatingTrigger, other], reminders: [newReminder], now: testDate) == nil)
+precondition(MinuteScheduleReplacement.plan(actual: acceptedOriginal, desired: phases + [replacement, renamed(other)],
+                                           reminders: [newReminder], now: testDate) == nil)
+precondition(MinuteScheduleReplacement.plan(actual: acceptedOriginal, desired: Array(desired.dropFirst()),
+                                           reminders: [newReminder], now: testDate) == nil)
+precondition(MinuteScheduleReplacement.plan(actual: acceptedOriginal, desired: desired + [phase(0)],
+                                           reminders: [newReminder], now: testDate) == nil)
+
+var pastDue = newReminder
+pastDue.due = testDate.addingTimeInterval(-180)
+let pastDueRequest = request(pastDue)
+let alignedPast = changingContent(pastDueRequest) {
+    $0.userInfo[NagDelivery.scheduledKey] = testDate.addingTimeInterval(-60).timeIntervalSince1970
+}
+precondition(MinuteScheduleReplacement.plan(actual: original + [alignedPast],
+    desired: phases + [alignedPast, other], reminders: [pastDue], now: testDate) != nil)
+let distantAligned = changingContent(pastDueRequest) {
+    $0.userInfo[NagDelivery.scheduledKey] = testDate.addingTimeInterval(120).timeIntervalSince1970
+}
+precondition(MinuteScheduleReplacement.plan(actual: original + [distantAligned],
+    desired: phases + [distantAligned, other], reminders: [pastDue], now: testDate) == nil)
+
 let crowdedOthers = phases + (0..<47).map(unrelated)
 precondition(crowdedOthers.count == 59)
 let sixty = crowdedOthers + [old]
@@ -102,6 +169,8 @@ precondition(MinuteScheduleReplacement.plan(actual: tooManyOther + [old], desire
     var ignoreRemove = false
     var onAdd: (() -> Void)?
     var onRead: (() -> Void)?
+    var onRemove: (() -> Void)?
+    var readback: (([UNNotificationRequest], Int) -> [UNNotificationRequest])?
     let targetID: UUID
 
     init(_ requests: [UNNotificationRequest], targetID: UUID = oldReminder.id) {
@@ -112,7 +181,7 @@ precondition(MinuteScheduleReplacement.plan(actual: tooManyOther + [old], desire
         MinuteScheduleReplacement.Operations(pending: {
             self.reads += 1
             self.onRead?()
-            return self.requests
+            return self.readback?(self.requests, self.reads) ?? self.requests
         }, add: { request in
             self.events.append("add"); self.adds += 1
             if self.failAdd { throw MinuteScheduleReplacement.Problem(message: "Mock add failure") }
@@ -131,13 +200,20 @@ precondition(MinuteScheduleReplacement.plan(actual: tooManyOther + [old], desire
             if !self.ignoreRemove { self.requests.removeAll { ids.contains($0.identifier) } }
             precondition(self.requests.contains { PendingNudge($0.identifier)?.id == self.targetID },
                          "Never remove the final confirmed target request")
+            self.onRemove?()
         })
     }
 }
 
-@MainActor func expectFailure(_ body: () async throws -> Void) async {
+@discardableResult @MainActor
+func expectFailure(_ body: () async throws -> Void) async -> MinuteScheduleReplacement.Problem {
     do { try await body(); preconditionFailure("Expected a verified scheduling failure") }
-    catch { }
+    catch {
+        guard let problem = error as? MinuteScheduleReplacement.Problem else {
+            preconditionFailure("Expected a scoped scheduling error, received \(error)")
+        }
+        return problem
+    }
 }
 
 @MainActor func runChecks() async throws {
@@ -146,6 +222,54 @@ precondition(MinuteScheduleReplacement.plan(actual: tooManyOther + [old], desire
     precondition(normalOutcome == .applied && normal.events == ["add", "remove"])
     precondition(HourlyNagSchedule.matches(normal.requests, desired))
     precondition(HourlyNagSchedule.matches(normal.requests.filter(HourlyNagSchedule.isPhase), phases))
+
+    let retireOnly = MockCenter(acceptedOriginal)
+    let retired = try await MinuteScheduleReplacement.apply(retirement, operations: retireOnly.operations, isCurrent: { true })
+    precondition(retired == .applied && retireOnly.adds == 0 && retireOnly.events == ["remove"])
+    precondition(HourlyNagSchedule.matches(retireOnly.requests, desired))
+
+    // A successful add can be temporarily absent from readback. Its retry must
+    // recognize that SAME generation once visible, then retire only the backup.
+    let delayedReadback = MockCenter(original)
+    delayedReadback.readback = { records, read in
+        read >= 2 ? records.filter { $0.identifier != replacement.identifier } : records
+    }
+    let addVerificationFailure = await expectFailure {
+        _ = try await MinuteScheduleReplacement.apply(basic, operations: delayedReadback.operations, isCurrent: { true })
+    }
+    precondition(addVerificationFailure.details.contains("Stage: after replacement add."))
+    precondition(addVerificationFailure.details.contains("MISSING") && addVerificationFailure.details.contains(replacement.identifier))
+    precondition(!addVerificationFailure.message.contains("Stage:") && addVerificationFailure.errorDescription == addVerificationFailure.message)
+    precondition(delayedReadback.adds == 1 && delayedReadback.removals.isEmpty)
+    delayedReadback.readback = nil
+    let retryAccepted = MinuteScheduleReplacement.plan(actual: delayedReadback.requests, desired: desired,
+                                                       reminders: [newReminder], now: testDate)!
+    precondition(retryAccepted.replacementAlreadyAccepted)
+    _ = try await MinuteScheduleReplacement.apply(retryAccepted, operations: delayedReadback.operations, isCurrent: { true })
+    precondition(delayedReadback.adds == 1 && delayedReadback.events == ["add", "remove"])
+    precondition(HourlyNagSchedule.matches(delayedReadback.requests, desired))
+
+    // The fresh state check also protects retire-only retries. A fired unrelated
+    // one-shot requires replanning; it is not permission to cancel other records.
+    let staleRetirement = MockCenter(acceptedOriginal.filter { $0.identifier != other.identifier })
+    let staleProblem = await expectFailure {
+        _ = try await MinuteScheduleReplacement.apply(retirement, operations: staleRetirement.operations, isCurrent: { true })
+    }
+    precondition(staleRetirement.events.isEmpty && staleProblem.details.contains("Stage: before replacement."))
+    precondition(staleProblem.details.contains(other.identifier))
+    var retirementCurrent = true
+    let supersededRetirement = MockCenter(acceptedOriginal)
+    supersededRetirement.onRead = { retirementCurrent = false }
+    let skippedRetirement = try await MinuteScheduleReplacement.apply(retirement, operations: supersededRetirement.operations,
+                                                                     isCurrent: { retirementCurrent })
+    precondition(skippedRetirement == .superseded && supersededRetirement.events.isEmpty)
+    retirementCurrent = true
+    let changedAfterRetirement = MockCenter(acceptedOriginal)
+    changedAfterRetirement.onRemove = { retirementCurrent = false }
+    let retiredThenSuperseded = try await MinuteScheduleReplacement.apply(retirement, operations: changedAfterRetirement.operations,
+                                                                          isCurrent: { retirementCurrent })
+    precondition(retiredThenSuperseded == .superseded && changedAfterRetirement.adds == 0)
+    precondition(HourlyNagSchedule.matches(changedAfterRetirement.requests, desired))
 
     let atBudget = MockCenter(sixty)
     let atBudgetPlan = MinuteScheduleReplacement.plan(actual: sixty, desired: sixtyDesired, reminders: [newReminder])!
@@ -196,8 +320,19 @@ precondition(MinuteScheduleReplacement.plan(actual: tooManyOther + [old], desire
     precondition(stoppedAtConfirmation == .superseded && changedDuringConfirmation.removals.isEmpty)
 
     let ignoredRemoval = MockCenter(original); ignoredRemoval.ignoreRemove = true
-    await expectFailure { _ = try await MinuteScheduleReplacement.apply(basic, operations: ignoredRemoval.operations, isCurrent: { true }) }
+    let removalProblem = await expectFailure {
+        _ = try await MinuteScheduleReplacement.apply(basic, operations: ignoredRemoval.operations, isCurrent: { true })
+    }
+    precondition(removalProblem.details.contains("Stage: after old-generation retirement."))
+    precondition(removalProblem.details.contains("EXTRA") && removalProblem.details.contains(old.identifier))
     precondition(ignoredRemoval.adds == 1 && ignoredRemoval.removals.count == 1)
+    ignoredRemoval.ignoreRemove = false
+    let retryRetirement = MinuteScheduleReplacement.plan(actual: ignoredRemoval.requests, desired: desired,
+                                                         reminders: [newReminder], now: testDate)!
+    precondition(retryRetirement.replacementAlreadyAccepted)
+    _ = try await MinuteScheduleReplacement.apply(retryRetirement, operations: ignoredRemoval.operations, isCurrent: { true })
+    precondition(ignoredRemoval.adds == 1 && ignoredRemoval.removals.count == 2)
+    precondition(HourlyNagSchedule.matches(ignoredRemoval.requests, desired))
 
     // Ten edits can each supersede a successful add callback. Verify bounded
     // redundant-generation pruning, no global cancellation, and eventual latest
@@ -235,7 +370,15 @@ precondition(MinuteScheduleReplacement.plan(actual: tooManyOther + [old], desire
     precondition(fullFailure.requests.filter { PendingNudge($0.identifier)?.id == oldReminder.id }.count == 4)
     precondition(HourlyNagSchedule.matches(fullFailure.requests.filter { PendingNudge($0.identifier)?.id != oldReminder.id }, crowdedOthers))
     precondition(MinuteScheduleReplacement.plan(actual: fullQueue + [unrelated(200)], desired: sixtyDesired, reminders: [newReminder]) == nil)
+    let fullAccepted = crowdedOthers + Array(oldGenerations.prefix(4)) + [replacement]
+    let fullRetirement = MinuteScheduleReplacement.plan(actual: fullAccepted, desired: sixtyDesired,
+                                                        reminders: [newReminder], now: testDate)!
+    precondition(fullRetirement.replacementAlreadyAccepted && fullRetirement.preflightRemovals.isEmpty)
+    let fullRetry = MockCenter(fullAccepted)
+    _ = try await MinuteScheduleReplacement.apply(fullRetirement, operations: fullRetry.operations, isCurrent: { true })
+    precondition(fullRetry.adds == 0 && fullRetry.peak == 64 && fullRetry.requests.count == 60)
+    precondition(HourlyNagSchedule.matches(fullRetry.requests, sixtyDesired))
 }
 
 try await runChecks()
-print("Minute replacement checks passed: scoped add/confirm/retire, phase preservation, failures, capacity, and rapid revision races.")
+print("Minute replacement checks passed: scoped add/confirm/retire, validated retire-only retries, diagnostics, phase preservation, failures, capacity, and rapid revision races.")

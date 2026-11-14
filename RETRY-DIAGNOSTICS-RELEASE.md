@@ -1,0 +1,9 @@
+# 1.1.15 (27): retry repair and persistent notification reports
+
+A one-minute replacement may have been accepted even when a later verification or old-generation removal failed. The next retry previously rejected that already-accepted replacement and could enter the wider schedule update. A narrow retirement-only retry now validates the accepted current alarm, confirms all unrelated requests are unchanged, removes only obsolete requests for that reminder, and checks the result. It does not install shared-ID multi-phase groups through single-request add.
+
+Notification details are always available in Settings, before Appearance and Backup. Failures are saved separately from the reminder database and remain readable after the warning disappears or the app restarts. The report records the adjustment, route, failure stage, pending-array mismatch, request/trigger details for protected-schedule mismatches, and later recovery result. The report is bounded; it is only shared when the user invokes Share. Backup and version remain last.
+
+The reported transient warning across all Nag Me intervals is not yet diagnosed conclusively. The exact old wording quoted by the user is absent from the verified 1.1.14 (26) IPA; its replacement warning is present. This does not establish which runtime check failed. Static review did not prove a timezone/calendar normalization issue. This build retains strict schedule verification and captures the missing evidence rather than treating a disappearing warning as proof of correctness.
+
+Validation: the existing iOS 17.4 typecheck and regression pipeline plus new same-generation retry, failure-stage, retained-report persistence and bounding checks. Physical iOS 17.4.1 behavior still requires the user to reproduce a time adjustment and share Settings > Notifications > Show notification details, even if the warning has already cleared.
