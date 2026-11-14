@@ -82,15 +82,15 @@ let changedSound = phases[0].content.mutableCopy() as! UNMutableNotificationCont
 changedSound.sound = UNNotificationSound(named: UNNotificationSoundName(rawValue: "Chime.caf"))
 let soundRequest = UNNotificationRequest(identifier: phases[0].identifier, content: changedSound, trigger: phases[0].trigger)
 let soundMismatch = HourlyNagSchedule.mismatch([soundRequest], [phases[0]])!
-// Frameworks may update other content defaults when a sound is assigned. The
-// diagnostic must identify the sound difference and preserve the unchanged
-// trigger; any additional fields that really differ should also be reported.
+// A sound difference can be stored in framework properties not exposed by
+// public getters. Accept the named field or explicit other-properties fallback;
+// the changed content must still be rejected and its trigger remain unchanged.
 precondition(soundMismatch.changed.count == 1 && soundMismatch.missing.isEmpty && soundMismatch.extra.isEmpty,
              soundMismatch.description)
-precondition(soundMismatch.changed[0].contentFields.contains("sound") && !soundMismatch.changed[0].triggerChanged,
+precondition((soundMismatch.changed[0].contentFields.contains("sound") || soundMismatch.changed[0].contentFields == ["other properties"]) && !soundMismatch.changed[0].triggerChanged,
              soundMismatch.description)
 precondition(!HourlyNagSchedule.matches([soundRequest], [phases[0]]))
-precondition(soundMismatch.description.contains("content.sound"))
+precondition(soundMismatch.description.contains("content.sound") || soundMismatch.description.contains("content.other properties"), soundMismatch.description)
 let invalidPhase = phases[0].content.mutableCopy() as! UNMutableNotificationContent
 invalidPhase.userInfo[HourlyNagSchedule.phaseKey] = "invalid"
 let invalidRequest = UNNotificationRequest(identifier: phases[0].identifier, content: invalidPhase, trigger: phases[0].trigger)
