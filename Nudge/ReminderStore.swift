@@ -19,6 +19,7 @@ final class ReminderStore: ObservableObject {
     @Published private(set) var needsSettings = false
     @Published private(set) var storageIssue: String?
     @Published private(set) var schedulingIssue: String?
+    @Published private(set) var isUpdatingNotifications = false
     @Published private(set) var soundOnlyEnabled = NagDelivery.enabled
     @Published private(set) var deliveryStatus = "Checking upcoming notification delivery."
     @Published private(set) var notificationDiagnostics = "Refresh after a test to read the notifications still held by iOS."
@@ -35,7 +36,10 @@ final class ReminderStore: ObservableObject {
     private var permissionRequestedByUser = false
     private var canQueueMinuteRepeats = NotificationRequestFactory.supportsMinuteRepeats
     private var phaseRetry: Task<Void, Never>?
-    private var phaseRetryCount = 0
+    private var retryBudget = NotificationRetryBudget()
+    private var adjustmentSequence = QuickAdjustmentSequence()
+    private var deliveredCleanupPrefixes: Set<String> = []
+    private var adjustmentBackgroundTask: UIBackgroundTaskIdentifier = .invalid
 
     private init() {
         let disk = UserDefaults.standard
@@ -111,12 +115,7 @@ final class ReminderStore: ObservableObject {
             return
         }
         guard commit(change.snapshot, retiring: change.retiring, animation: animation) == nil else { return }
-        let oldCards = delivered.compactMap { item -> String? in
-            guard let request = PendingNudge(item.request.identifier), request.id == reminder.id,
-                  observed.contains(request.generationIdentifier) else { return nil }
-            return item.request.identifier
-        }
-        if !oldCards.isEmpty { center.removeDeliveredNotifications(withIdentifiers: oldCards) }
+        deliveredCleanupPrefixes.formUnion(observed.map { ScheduledAlert.prefix + $0 + "." })
     }
 
     func done(_ occurrence: ReminderOccurrence, now: Date = .now, animation: Animation? = nil) async {
@@ -152,14 +151,21 @@ final class ReminderStore: ObservableObject {
     func adjustTime(_ reminder: Reminder, by shift: ReminderTimeShift, direction: ReminderTimeShift.Direction,
                     now: Date = .now) -> String? {
         guard loadDatabase() else { return storageIssue ?? Self.storageUnavailable }
-        guard currentIndex(reminder.id, generation: reminder.generation) != nil else {
+        guard let current = adjustmentSequence.currentReminder(for: reminder, in: snapshot) else {
             return ReminderLifecycle.Problem.changed.rawValue
         }
-        guard let change = ReminderLifecycle.adjusting(reminder, by: shift, direction: direction,
+        guard let change = ReminderLifecycle.adjusting(current, by: shift, direction: direction,
                                                       in: snapshot, now: now) else {
             return "Choose a time in the future."
         }
-        return commit(change.snapshot, retiring: change.retiring)
+        // Persist every tap immediately. A running OS transaction finishes
+        // uncancelled; its successor uses the newest durable reminder state.
+        let problem = commit(change.snapshot, retiring: change.retiring,
+                             adjustment: true, syncDelay: 0.4)
+        if problem == nil, let latest = snapshot.reminders.first(where: { $0.id == current.id }) {
+            adjustmentSequence.record(previous: current, next: latest)
+        }
+        return problem
     }
 
     func handleAction(_ action: String, id: String, generation: String, at time: Date) async {
@@ -193,8 +199,10 @@ final class ReminderStore: ObservableObject {
                 return
             }
         }
-        enqueueSync()
+        enqueueSync(resetRetries: true)
     }
+
+    func retryNotifications() { refresh() }
 
     private func loadDatabase() -> Bool {
         do {
@@ -224,8 +232,9 @@ final class ReminderStore: ObservableObject {
     @discardableResult
     private func commit(_ changed: ReminderSnapshot, retiring previous: Reminder? = nil,
                         askPermission: Bool = false, refreshAlerts: Bool = true,
-                        animation: Animation? = nil) -> String? {
-        guard !PreservedNotificationSchedule.inProgress else {
+                        animation: Animation? = nil, adjustment: Bool = false,
+                        syncDelay: TimeInterval = 0) -> String? {
+        guard adjustment || !PreservedNotificationSchedule.inProgress else {
             let message = "Notifications are being updated. Please try this change again in a moment."
             schedulingIssue = message
             status = message
@@ -247,8 +256,10 @@ final class ReminderStore: ObservableObject {
         }
         verifiedEmpty = false
         storageIssue = nil
+        if !adjustment { adjustmentSequence.reset() }
         if let previous { clearNotifications(for: previous) }
-        if refreshAlerts { enqueueSync(askPermission: askPermission) }
+        if adjustment { beginAdjustmentBackgroundTask() }
+        if refreshAlerts { enqueueSync(askPermission: askPermission, delay: syncDelay, resetRetries: true) }
         return nil
     }
 
@@ -258,11 +269,52 @@ final class ReminderStore: ObservableObject {
 
     private func clearNotifications(for reminder: Reminder) {
         let prefix = "\(ScheduledAlert.prefix)\(reminder.id.uuidString).\(reminder.generation.uuidString)."
-        // Reconciliation removes the obsolete pending requests. Clear the visible stack too.
-        center.getDeliveredNotifications { [center] delivered in
-            let ids = delivered.map { $0.request.identifier }.filter { $0.hasPrefix(prefix) }
-            center.removeDeliveredNotifications(withIdentifiers: ids)
+        // Process this inside the serialized scheduler. An independent callback
+        // could remove a card while the protected transaction verifies it.
+        deliveredCleanupPrefixes.insert(prefix)
+    }
+
+    private func flushDeliveredCleanup(revision: Int, retiringVerified: Bool = false) async -> Bool {
+        let prefixes = deliveredCleanupPrefixes
+        guard !prefixes.isEmpty else { return true }
+        let cards = await center.deliveredNotifications()
+        guard revision == syncRevision else { return false }
+        let ids = cards.map { $0.request.identifier }.filter { id in prefixes.contains { id.hasPrefix($0) } }
+        if !ids.isEmpty { center.removeDeliveredNotifications(withIdentifiers: ids) }
+        for _ in 0..<15 {
+            let remaining = await center.deliveredNotifications()
+            guard revision == syncRevision else { return false }
+            if !remaining.contains(where: { card in prefixes.contains { card.request.identifier.hasPrefix($0) } }) {
+                // An old repeat may fire during a scheduling wait. Keep its
+                // cleanup intent until after replacement and a pending readback.
+                if retiringVerified {
+                    let pending = await center.pendingNotificationRequests()
+                    guard revision == syncRevision else { return false }
+                    let retired = prefixes.filter { prefix in
+                        !pending.contains { $0.identifier.hasPrefix(prefix) }
+                    }
+                    deliveredCleanupPrefixes.subtract(retired)
+                }
+                return true
+            }
+            try? await Task.sleep(nanoseconds: 100_000_000)
         }
+        schedulingIssue = "Waiting for old reminder cards to clear. Your reminder changes are saved."
+        retryPhaseSync()
+        return false
+    }
+
+    private func beginAdjustmentBackgroundTask() {
+        guard adjustmentBackgroundTask == .invalid else { return }
+        adjustmentBackgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Save reminder time adjustments") { [weak self] in
+            Task { @MainActor in self?.endAdjustmentBackgroundTask() }
+        }
+    }
+
+    private func endAdjustmentBackgroundTask() {
+        guard adjustmentBackgroundTask != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(adjustmentBackgroundTask)
+        adjustmentBackgroundTask = .invalid
     }
 
     private func persist<T: Encodable>(_ value: T, key: String) {
@@ -273,16 +325,30 @@ final class ReminderStore: ObservableObject {
         }
     }
 
-    private func enqueueSync(askPermission: Bool = false) {
+    private func enqueueSync(askPermission: Bool = false, delay: TimeInterval = 0, resetRetries: Bool = false) {
         permissionRequestedByUser = permissionRequestedByUser || askPermission
+        if resetRetries {
+            phaseRetry?.cancel()
+            retryBudget.reset()
+        }
         let prior = syncTask
         syncRevision += 1
         let revision = syncRevision
-        schedulingIssue = nil
+        let notBefore = Date.now.addingTimeInterval(delay)
+        isUpdatingNotifications = true
         syncTask = Task { [weak self] in
             await prior?.value
-            guard let self else { return }
+            guard let self, revision == self.syncRevision else { return }
+            let remaining = notBefore.timeIntervalSinceNow
+            if remaining > 0 { try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000)) }
+            guard revision == self.syncRevision else { return }
             await self.reconcile(revision: revision)
+            guard revision == self.syncRevision else { return }
+            _ = await self.flushDeliveredCleanup(revision: revision, retiringVerified: true)
+            guard revision == self.syncRevision else { return }
+            self.isUpdatingNotifications = false
+            self.adjustmentSequence.reset()
+            self.endAdjustmentBackgroundTask()
         }
     }
 
@@ -291,6 +357,7 @@ final class ReminderStore: ObservableObject {
         guard revision == syncRevision else { return }
         var requests = await center.pendingNotificationRequests()
         guard revision == syncRevision else { return }
+        guard await flushDeliveredCleanup(revision: revision) else { return }
         if !loadDatabase() {
             guard storageIssue == nil, UIApplication.shared.applicationState == .active,
                   UIApplication.shared.isProtectedDataAvailable else { return }
@@ -467,6 +534,10 @@ final class ReminderStore: ObservableObject {
             schedulingIssue = "Some alerts could not be queued. Check your reminders before closing Nudge."
         } else if repeatingMinuteIDs.count < minuteReminders.count {
             schedulingIssue = "iOS couldn’t queue a repeating one-minute alert. Individual alerts are scheduled instead."
+        } else {
+            schedulingIssue = nil
+            phaseRetry?.cancel()
+            retryBudget.reset()
         }
         if !lockScreenEnabled {
             status = "Turn on Lock Screen alerts for Nudge in iPhone Settings."
@@ -480,8 +551,12 @@ final class ReminderStore: ObservableObject {
     }
 
     private func retryPhaseSync(after delay: Double = 3) {
-        guard phaseRetryCount < 6 else { return }
-        phaseRetryCount += 1
+        guard retryBudget.consume() else {
+            schedulingIssue = "Automatic retries stopped. Your reminder changes are saved. Tap Retry alerts to try again."
+                + (PreservedNotificationSchedule.hasJournal ? " Some alerts may be paused until recovery completes." : "")
+            status = schedulingIssue!
+            return
+        }
         phaseRetry?.cancel()
         phaseRetry = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
@@ -585,43 +660,64 @@ final class ReminderStore: ObservableObject {
             // nextTriggerDate(), which would restart their countdown.
             let comparable = try requests.map(PreservedNotificationSchedule.absolute)
             if !HourlyNagSchedule.matches(comparable, desired) || PreservedNotificationSchedule.hasJournal {
-                // A newly-created reminder due in the next few seconds must not
-                // miss its first alert while the preservation transaction waits.
-                // Install that first alert normally, then arm the repeat phases
-                // after delivery. Both use the same action/card identifier.
-                let imminent = desired.filter { candidate in
-                    (candidate.content.userInfo[HourlyNagSchedule.phaseKey] as? Int == 0 || candidate.trigger?.repeats == false)
-                        && !requests.contains(where: { old in old.identifier == candidate.identifier })
+                // Reuse raw OS objects for unchanged requests. The bulk path
+                // needs absolute dates, but re-adding those unrelated requests
+                // is unnecessary when just one minute-repeat changes.
+                var unused = Array(requests.indices)
+                let narrowDesired = desired.map { candidate -> UNNotificationRequest in
+                    guard let match = unused.firstIndex(where: {
+                        HourlyNagSchedule.matches([comparable[$0]], [candidate])
+                    }) else { return candidate }
+                    return requests[unused.remove(at: match)]
                 }
-                for first in imminent {
-                    let planned = (first.content.userInfo[NagDelivery.scheduledKey] as? Double).map(Date.init(timeIntervalSince1970:))
-                    guard let date = PreservedNotificationSchedule.firstDate(first.trigger) ?? planned,
-                          date > .now, date.timeIntervalSinceNow < 8 else { continue }
-                    let content = first.content.mutableCopy() as! UNMutableNotificationContent
-                    content.userInfo.removeValue(forKey: HourlyNagSchedule.phaseKey)
-                    content.userInfo.removeValue(forKey: HourlyNagSchedule.anchorKey)
-                    content.userInfo.removeValue(forKey: HourlyNagSchedule.minutesKey)
-                    let parts = Calendar.autoupdatingCurrent.dateComponents([.era, .year, .month, .day, .hour, .minute, .second], from: date)
-                    try await center.add(UNNotificationRequest(identifier: first.identifier, content: content,
-                        trigger: UNCalendarNotificationTrigger(dateMatching: parts, repeats: false)))
-                    schedulingIssue = "The first alert is queued. Keep the app open briefly while continuous nags are prepared."
-                    status = schedulingIssue!
-                    try await Task.sleep(nanoseconds: 3_000_000_000)
-                    guard revision == syncRevision else { return true }
-                    return await reconcileHourlyNagSchedule(requests: await center.pendingNotificationRequests(), revision: revision, waits: waits + 1)
-                }
-                if PreservedNotificationSchedule.nearDelivery(requests) || Date.now < PreservedNotificationSchedule.retryAfter {
-                    schedulingIssue = "An alert is arriving or iOS is finishing an update. Keep the app open while the schedule is updated."
-                    status = schedulingIssue!
-                    if waits < 5 {
+                let narrowPlan = !PreservedNotificationSchedule.hasJournal
+                    && !PreservedNotificationSchedule.inProgress && Date.now >= PreservedNotificationSchedule.retryAfter
+                    ? MinuteScheduleReplacement.plan(actual: requests, desired: narrowDesired, reminders: reminders) : nil
+                if let narrowPlan {
+                    // Once started, never fall through to a global rebuild on
+                    // failure or supersession. The serial retry reads afresh.
+                    let outcome = try await MinuteScheduleReplacement.apply(narrowPlan, center: center,
+                        isCurrent: { self.syncRevision == revision })
+                    guard outcome == .applied else { return true }
+                } else {
+                    // A newly-created reminder due in the next few seconds must not
+                    // miss its first alert while the preservation transaction waits.
+                    // Install that first alert normally, then arm the repeat phases
+                    // after delivery. Both use the same action/card identifier.
+                    let imminent = desired.filter { candidate in
+                        (candidate.content.userInfo[HourlyNagSchedule.phaseKey] as? Int == 0 || candidate.trigger?.repeats == false)
+                            && !requests.contains(where: { old in old.identifier == candidate.identifier })
+                    }
+                    for first in imminent {
+                        let planned = (first.content.userInfo[NagDelivery.scheduledKey] as? Double).map(Date.init(timeIntervalSince1970:))
+                        guard let date = PreservedNotificationSchedule.firstDate(first.trigger) ?? planned,
+                              date > .now, date.timeIntervalSinceNow < 8 else { continue }
+                        let content = first.content.mutableCopy() as! UNMutableNotificationContent
+                        content.userInfo.removeValue(forKey: HourlyNagSchedule.phaseKey)
+                        content.userInfo.removeValue(forKey: HourlyNagSchedule.anchorKey)
+                        content.userInfo.removeValue(forKey: HourlyNagSchedule.minutesKey)
+                        let parts = Calendar.autoupdatingCurrent.dateComponents([.era, .year, .month, .day, .hour, .minute, .second], from: date)
+                        try await center.add(UNNotificationRequest(identifier: first.identifier, content: content,
+                            trigger: UNCalendarNotificationTrigger(dateMatching: parts, repeats: false)))
+                        schedulingIssue = "The first alert is queued. Keep the app open briefly while continuous nags are prepared."
+                        status = schedulingIssue!
                         try await Task.sleep(nanoseconds: 3_000_000_000)
                         guard revision == syncRevision else { return true }
                         return await reconcileHourlyNagSchedule(requests: await center.pendingNotificationRequests(), revision: revision, waits: waits + 1)
                     }
-                    retryPhaseSync()
-                    return true
+                    if PreservedNotificationSchedule.nearDelivery(requests) || Date.now < PreservedNotificationSchedule.retryAfter {
+                        schedulingIssue = "An alert is arriving or iOS is finishing an update. Keep the app open while the schedule is updated."
+                        status = schedulingIssue!
+                        if waits < 5 {
+                            try await Task.sleep(nanoseconds: 3_000_000_000)
+                            guard revision == syncRevision else { return true }
+                            return await reconcileHourlyNagSchedule(requests: await center.pendingNotificationRequests(), revision: revision, waits: waits + 1)
+                        }
+                        retryPhaseSync()
+                        return true
+                    }
+                    try await PreservedNotificationSchedule.apply(desired, original: requests)
                 }
-                try await PreservedNotificationSchedule.apply(desired, original: requests)
             }
             guard revision == syncRevision else { return true }
             // Migration may leave finite-queue cards for this SAME occurrence
@@ -636,7 +732,7 @@ final class ReminderStore: ObservableObject {
                 return parsed.identifier
             }
             if !obsoleteCards.isEmpty { center.removeDeliveredNotifications(withIdentifiers: obsoleteCards) }
-            phaseRetry?.cancel(); phaseRetryCount = 0
+            phaseRetry?.cancel(); retryBudget.reset()
             let continuous = allocation.repeatingIDs.count
             deliveryStatus = "\(continuous) continuous 2/5/10/15/20/30-minute reminders. \(desired.count) scheduled entries."
             if allocation.fallbackCount > 0 || plan.unscheduledFirstAlerts > 0 {
@@ -645,6 +741,7 @@ final class ReminderStore: ObservableObject {
             status = schedulingIssue ?? "Alerts queued. 2/5/10/15/20/30-minute nags reuse one notification per reminder."
             return true
         } catch {
+            guard revision == syncRevision else { return true }
             schedulingIssue = error.localizedDescription
             if PreservedNotificationSchedule.hasJournal { schedulingIssue! += " Some alerts may be paused until recovery completes." }
             status = schedulingIssue!
@@ -780,6 +877,10 @@ final class ReminderStore: ObservableObject {
                      "API records are not a count of visible Lock Screen cards. Check the screen directly.",
                      "Read-only snapshot; no notification removal requested."]
         lines.append("Repeating phase records: \(pending.filter(HourlyNagSchedule.isPhase).count). Recovery pending: \(PreservedNotificationSchedule.hasJournal). \(schedulingIssue ?? "")")
+        lines.append("Automatic retries used: \(retryBudget.attempts)/\(retryBudget.maximum). Update running: \(isUpdatingNotifications).")
+        if let details = PreservedNotificationSchedule.latestVerificationDetails {
+            lines.append("Last unverified schedule:\n\(details)")
+        }
         for item in delivered.sorted(by: { $0.date < $1.date }) {
             lines.append("REPORTED · \(title(item.request.content)) · \(mode(item.request.content)) · delivered \(time(item.date)) · \(item.request.identifier)")
         }

@@ -25,6 +25,9 @@ import ObjectiveC
     static var hasJournal: Bool { FileManager.default.fileExists(atPath: journalURL.path) }
     static var retryAfter = Date.distantPast
     static var inProgress = false
+    // Retain the most recent failed readback until a complete update succeeds.
+    // This describes a mismatch, not proof that iOS lost every reported record.
+    private(set) static var latestVerificationDetails: String?
     private typealias Reply = @convention(block) (NSError?) -> Void
     private typealias Bulk = @convention(c) (AnyObject, Selector, NSArray, Reply) -> Void
     private typealias Protect = @convention(c) (AnyObject, Selector, NSString, UNNotificationContent, Reply) -> Void
@@ -135,13 +138,19 @@ import ObjectiveC
             }) { retryAfter = .now.addingTimeInterval(15); throw Problem(message: error) }
         }
         var matched = false
-        for _ in 0..<6 {
-            if HourlyNagSchedule.matches(await center.pendingNotificationRequests(), desired) { matched = true; break }
-            try await Task.sleep(nanoseconds: 150_000_000)
+        var lastReadback: [UNNotificationRequest] = []
+        for attempt in 0..<12 {
+            lastReadback = await center.pendingNotificationRequests()
+            if HourlyNagSchedule.matches(lastReadback, desired) { matched = true; break }
+            if attempt < 11 { try await Task.sleep(nanoseconds: 250_000_000) }
         }
-        guard matched else { throw Problem(message: "iOS did not retain the full schedule. Recovery is saved; keep the app open to retry.") }
+        guard matched else {
+            latestVerificationDetails = HourlyNagSchedule.mismatchDescription(actual: lastReadback, expected: desired)
+            throw Problem(message: "The app could not verify the updated notification schedule. Recovery is saved; keep the app open to retry.")
+        }
         try verify(before, await center.deliveredNotifications())
         try FileManager.default.removeItem(at: journalURL)
+        latestVerificationDetails = nil
     }
 }
 

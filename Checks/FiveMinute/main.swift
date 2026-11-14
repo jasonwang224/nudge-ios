@@ -42,6 +42,56 @@ let archive = try NSKeyedArchiver.archivedData(withRootObject: full, requiringSe
 let decoded = try NSKeyedUnarchiver.unarchivedObject(ofClasses: [NSArray.self, UNNotificationRequest.self], from: archive) as! [UNNotificationRequest]
 precondition(HourlyNagSchedule.matches(decoded, full), "Recovery must retain duplicate phases AND unrelated requests")
 
+// A count alone cannot distinguish loss from normalization. Diagnose each
+// unmatched record without collapsing duplicate identifiers or phase copies.
+precondition(HourlyNagSchedule.mismatch(Array(phases.reversed()), phases) == nil)
+let missingPhase = HourlyNagSchedule.mismatch(Array(phases.dropLast()), phases)!
+precondition(missingPhase.exactMatchCount == 11 && missingPhase.missing.count == 1)
+precondition(missingPhase.missing[0].contains("phase 11") && missingPhase.extra.isEmpty && missingPhase.changed.isEmpty)
+let wrongMultiplicity = HourlyNagSchedule.mismatch(broken, phases)!
+precondition(wrongMultiplicity.expectedCount == 12 && wrongMultiplicity.actualCount == 12)
+precondition(wrongMultiplicity.exactMatchCount == 11 && wrongMultiplicity.missing.count == 1 && wrongMultiplicity.extra.count == 1)
+precondition(wrongMultiplicity.missing[0].contains("phase 11") && wrongMultiplicity.extra[0].contains("phase 0"))
+precondition(wrongMultiplicity.changed.isEmpty, "An extra phase zero is not a changed phase eleven")
+let extraCopy = HourlyNagSchedule.mismatch(phases + [phases[0]], phases)!
+precondition(extraCopy.exactMatchCount == 12 && extraCopy.extra.count == 1 && extraCopy.missing.isEmpty && extraCopy.changed.isEmpty)
+let extraReminder = HourlyNagSchedule.mismatch(phases + [phase(0, id: "unrelated")], phases)!
+precondition(extraReminder.extra == ["unrelated · phase 0"])
+
+let changedTitle = phases[0].content.mutableCopy() as! UNMutableNotificationContent
+changedTitle.title = "Different title"
+let titleRequest = UNNotificationRequest(identifier: phases[0].identifier, content: changedTitle, trigger: phases[0].trigger)
+let titleMismatch = HourlyNagSchedule.mismatch([titleRequest], [phases[0]])!
+precondition(titleMismatch.missing.isEmpty && titleMismatch.extra.isEmpty && titleMismatch.changed.count == 1)
+precondition(titleMismatch.changed[0].contentFields == ["title"] && !titleMismatch.changed[0].triggerChanged)
+precondition(!HourlyNagSchedule.matches([titleRequest], [phases[0]]), "Diagnostics must not relax acceptance")
+let changedTrigger = UNCalendarNotificationTrigger(dateMatching: DateComponents(minute: 1), repeats: true)
+let triggerRequest = UNNotificationRequest(identifier: phases[0].identifier, content: phases[0].content, trigger: changedTrigger)
+let triggerMismatch = HourlyNagSchedule.mismatch([triggerRequest], [phases[0]])!
+precondition(triggerMismatch.changed.count == 1 && triggerMismatch.changed[0].triggerChanged)
+precondition(triggerMismatch.changed[0].contentFields.isEmpty && triggerMismatch.missing.isEmpty && triggerMismatch.extra.isEmpty)
+let bothRequest = UNNotificationRequest(identifier: phases[0].identifier, content: changedTitle, trigger: changedTrigger)
+let bothMismatch = HourlyNagSchedule.mismatch([bothRequest], [phases[0]])!
+precondition(bothMismatch.changed[0].contentFields == ["title"] && bothMismatch.changed[0].triggerChanged)
+
+// Exact matches must be consumed before pairing changes even when the same
+// identifier and phase appear twice with distinct content in a saved schedule.
+let exactFirst = HourlyNagSchedule.mismatch([titleRequest], [phases[0], titleRequest])!
+precondition(exactFirst.exactMatchCount == 1 && exactFirst.missing.count == 1 && exactFirst.changed.isEmpty)
+let changedSound = phases[0].content.mutableCopy() as! UNMutableNotificationContent
+changedSound.sound = UNNotificationSound(named: UNNotificationSoundName(rawValue: "Chime.caf"))
+let soundRequest = UNNotificationRequest(identifier: phases[0].identifier, content: changedSound, trigger: phases[0].trigger)
+let soundMismatch = HourlyNagSchedule.mismatch([soundRequest], [phases[0]])!
+precondition(soundMismatch.changed[0].contentFields == ["sound"] && !soundMismatch.changed[0].triggerChanged)
+precondition(!HourlyNagSchedule.matches([soundRequest], [phases[0]]))
+precondition(soundMismatch.description.contains("content.sound"))
+let invalidPhase = phases[0].content.mutableCopy() as! UNMutableNotificationContent
+invalidPhase.userInfo[HourlyNagSchedule.phaseKey] = "invalid"
+let invalidRequest = UNNotificationRequest(identifier: phases[0].identifier, content: invalidPhase, trigger: phases[0].trigger)
+let invalidMismatch = HourlyNagSchedule.mismatch([invalidRequest], [phases[0]])!
+precondition(invalidMismatch.missing.count == 1 && invalidMismatch.extra.count == 1 && invalidMismatch.changed.isEmpty)
+precondition(invalidMismatch.extra[0].contains("invalid phase metadata"))
+
 // Snooze creates a new action generation and first fire; Done stops only that
 // generation while daily recurrence survives. Allocation must use the new state.
 var daily = five[0]; daily.preferences.repeatRule = .daily
@@ -141,4 +191,4 @@ precondition(HourlyNagSchedule.recordedMinutes(newContent) == 15)
 newContent.userInfo[HourlyNagSchedule.minutesKey] = "bad"
 precondition(HourlyNagSchedule.recordedMinutes(newContent) == nil)
 for invalid in [-1, 0, 1, 3, 7, 60, Int.max] { precondition(HourlyNagCadence(minutes: invalid) == nil) }
-print("Hourly nag checks passed: 2/5/10/15/20/30-minute cadence, seven-day arithmetic, mixed capacity, legacy metadata, phase multiset, archive, Snooze, Done and interval edits.")
+print("Hourly nag checks passed: 2/5/10/15/20/30-minute cadence, seven-day arithmetic, mixed capacity, legacy metadata, phase multiset, mismatch diagnostics, archive, Snooze, Done and interval edits.")

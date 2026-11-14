@@ -20,13 +20,15 @@ models=(
     "$root/Nudge/NagDelivery.swift"
     "$root/Nudge/NotificationRequestFactory.swift"
     "$root/Nudge/FiveMinuteSchedule.swift"
+    "$root/Nudge/QuickAdjustmentSequence.swift"
+    "$root/Nudge/MinuteScheduleReplacement.swift"
 )
 
 xcrun swiftc -framework UserNotifications "${models[@]}" "$root/Checks/main.swift" \
     -o "$check_dir/scheduling-checks"
 "$check_dir/scheduling-checks"
 
-for suite in Agenda AgendaUI Editor Lifecycle Interactions Calendar FiveMinute; do
+for suite in Agenda AgendaUI Editor Lifecycle Interactions Calendar FiveMinute QuickAdjustment MinuteReplacement; do
     xcrun swiftc -framework UserNotifications "${models[@]}" "$root/Checks/$suite/main.swift" \
         -o "$check_dir/$suite-checks"
     "$check_dir/$suite-checks"

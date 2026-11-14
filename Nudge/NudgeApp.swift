@@ -43,8 +43,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         guard !Task.isCancelled else { return }
         let nudges = delivered.compactMap { NotificationRequestFactory.visibleNudge($0) }
         let obsolete = DeliveredNudge.supersededIdentifiers(in: nudges, by: incoming)
-        if !obsolete.isEmpty {
-            center.removeDeliveredNotifications(withIdentifiers: obsolete)
+        await MainActor.run {
+            // The read above can suspend while a protected update starts.
+            // Recheck and submit removal without another actor suspension.
+            guard !Task.isCancelled, !PreservedNotificationSchedule.inProgress else { return }
+            if !obsolete.isEmpty { center.removeDeliveredNotifications(withIdentifiers: obsolete) }
         }
     }
 }

@@ -210,13 +210,18 @@ private struct NudgeAgenda: View {
                     .buttonStyle(.plain).foregroundStyle(palette.accent)
                 }
                 if let issue = store.schedulingIssue, store.storageIssue == nil, !store.needsSettings {
-                    Label(issue, systemImage: "exclamationmark.triangle")
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label(issue, systemImage: "exclamationmark.triangle")
+                        Button(store.isUpdatingNotifications ? "Updating alerts…" : "Retry alerts") {
+                            store.retryNotifications()
+                        }
+                        .disabled(store.isUpdatingNotifications)
+                    }
                         .font(.footnote.weight(.medium))
                         .foregroundStyle(palette.ink)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(12)
                         .nudgePanel(palette, fill: palette.coral)
-                        .accessibilityElement(children: .combine)
                 }
                 HStack(spacing: 8) {
                     filterButton(todayOnly ? "Reminders" : "Scheduled", count: visible.count, completed: false)

@@ -13,6 +13,7 @@ struct NudgeSettings: View {
     @State private var pendingBackup: ReminderBackup?
     @State private var confirming = false
     @State private var message: String?
+    @State private var showingNotificationDetails = false
 
     private var versionLabel: String {
         let info = Bundle.main.infoDictionary ?? [:]
@@ -46,6 +47,22 @@ struct NudgeSettings: View {
                     Button("Import reminders") { importing = true }
                 }.padding(15).nudgePanel(palette)
                 Text(versionLabel).font(.footnote).foregroundStyle(palette.secondary)
+                if store.schedulingIssue != nil {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label("NOTIFICATION RECOVERY", systemImage: "bell.badge")
+                            .font(.caption.weight(.semibold))
+                        Text(store.schedulingIssue ?? "").font(.footnote)
+                        Button(store.isUpdatingNotifications ? "Updating alerts…" : "Retry alerts") {
+                            store.retryNotifications()
+                        }.disabled(store.isUpdatingNotifications)
+                        Button("Show notification details") {
+                            Task {
+                                await store.refreshNotificationDiagnostics()
+                                showingNotificationDetails = true
+                            }
+                        }
+                    }.padding(15).nudgePanel(palette)
+                }
                 PreferenceFields(preferences: $store.defaults, palette: palette)
                 VStack(alignment: .leading, spacing: 12) {
                     Label("APPEARANCE", systemImage: "moon")
@@ -92,6 +109,23 @@ struct NudgeSettings: View {
         } message: { Text(message ?? "") }
         .foregroundStyle(palette.ink)
         .background(palette.paper.ignoresSafeArea())
+        .sheet(isPresented: $showingNotificationDetails) {
+            NavigationStack {
+                ScrollView {
+                    Text(store.notificationDiagnostics).font(.footnote.monospaced())
+                        .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding()
+                }
+                .navigationTitle("Notification details").navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        ShareLink(item: store.notificationDiagnostics) { Image(systemName: "square.and.arrow.up") }
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { showingNotificationDetails = false }
+                    }
+                }
+            }
+        }
     }
 }
 
