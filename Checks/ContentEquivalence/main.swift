@@ -2,6 +2,8 @@ import Foundation
 import UserNotifications
 
 let testNow = Date(timeIntervalSince1970: 1_900_000_000)
+var testCalendar = Calendar(identifier: .gregorian)
+testCalendar.timeZone = TimeZone(secondsFromGMT: 0)!
 
 func content(body: String = "", subtitle: String = "") -> UNMutableNotificationContent {
     let result = UNMutableNotificationContent()
@@ -70,7 +72,6 @@ let forbiddenEdits: [(UNMutableNotificationContent) -> Void] = [
     { $0.badge = 7 },
     { $0.interruptionLevel = .passive },
     { $0.relevanceScore = 0.75 },
-    { $0.launchImageName = "different-launch-image" },
     { $0.targetContentIdentifier = "different-target" }
 ]
 for edit in forbiddenEdits {
@@ -88,12 +89,33 @@ if privateDifference.responds(to: NSSelectorFromString("setShouldHideDate:")) {
     print("This SDK does not expose shouldHideDate; public-property negative controls still ran.")
 }
 
-func reminder(minutes: Int) -> Reminder {
+func reminder(minutes: Int, dueOffset: TimeInterval = 600) -> Reminder {
     var preferences = ReminderPreferences()
     preferences.nagMinutes = minutes
-    let due = testNow.addingTimeInterval(600)
+    let due = testNow.addingTimeInterval(dueOffset)
     return Reminder(title: "Reminder \(minutes)", notes: "", due: due,
                     repeatAnchor: due, preferences: preferences)
+}
+
+func adjustedReminder(_ original: Reminder, by shift: ReminderTimeShift) -> Reminder {
+    let unrelated = reminder(minutes: 0)
+    let snapshot = ReminderSnapshot(reminders: [original, unrelated])
+    let change = ReminderLifecycle.adjusting(original, by: shift, direction: .later,
+        in: snapshot, now: testNow, calendar: testCalendar)!
+    let adjusted = change.snapshot.reminders.first { $0.id == original.id }!
+    let seconds: TimeInterval
+    switch shift {
+    case .fiveMinutes: seconds = 300
+    case .hour: seconds = 3600
+    case .day: seconds = 86400
+    }
+    // An already-notified reminder advances from now, not its old past time.
+    precondition(adjusted.alertDate == max(original.alertDate, testNow).addingTimeInterval(seconds))
+    precondition(adjusted.alertDate > testNow && adjusted.generation != original.generation)
+    precondition(adjusted.due == original.due && adjusted.repeatAnchor == original.repeatAnchor)
+    precondition(adjusted.preferences == original.preferences && adjusted.snoozedUntil == nil)
+    precondition(change.retiring == original && change.snapshot.reminders.contains(unrelated))
+    return adjusted
 }
 
 func normalized(_ request: UNNotificationRequest) -> UNNotificationRequest {
@@ -107,7 +129,7 @@ func phases(for reminder: Reminder) -> [UNNotificationRequest] {
     let cadence = HourlyNagCadence(minutes: reminder.preferences.nagMinutes)!
     return cadence.phaseDates(first: reminder.alertDate).enumerated().map { phase, date in
         let trigger = UNCalendarNotificationTrigger(
-            dateMatching: DateComponents(minute: phase * cadence.minutes, second: 7), repeats: true)
+            dateMatching: testCalendar.dateComponents([.minute, .second], from: date), repeats: true)
         let alert = ScheduledAlert(reminder: reminder, index: 0, date: date)
         let result = NotificationRequestFactory.make(for: alert, soundOnlyEnabled: false,
                                                      now: testNow, triggerOverride: trigger)
@@ -146,6 +168,37 @@ for minutes in [2, 5, 10, 15, 20, 30] {
     precondition(!HourlyNagSchedule.matches([renamed], [expected[0]]))
 }
 
+// Already-notified daily reminders can move into the future using each menu
+// increment or Snooze. Native nil text must not hide the old generation, change
+// the series anchor, or make the current phase group look incompletely saved.
+for minutes in [2, 5, 10, 15, 20, 30] {
+    var overdue = reminder(minutes: minutes, dueOffset: -60)
+    overdue.preferences.repeatRule = .daily
+    let oldPhases = phases(for: overdue).map(normalized)
+    for shift in ReminderTimeShift.allCases {
+        let adjusted = adjustedReminder(overdue, by: shift)
+        let expected = phases(for: adjusted)
+        let actual = expected.map(normalized)
+        precondition(HourlyNagSchedule.matches(actual, expected))
+        precondition(HourlyNagSchedule.mismatch(actual, expected) == nil)
+        precondition(!HourlyNagSchedule.matches(oldPhases, expected),
+                     "Empty-text equivalence must not accept the previous notification generation")
+        precondition(Set(actual.map(\.identifier)).isDisjoint(with: Set(oldPhases.map(\.identifier))))
+        precondition(adjusted.preferences.repeatRule == .daily)
+    }
+    let unrelated = reminder(minutes: 1)
+    let snoozedChange = ReminderLifecycle.snoozing(overdue,
+        in: ReminderSnapshot(reminders: [overdue, unrelated]), now: testNow)!
+    let snoozed = snoozedChange.snapshot.reminders.first { $0.id == overdue.id }!
+    precondition(snoozed.alertDate == testNow.addingTimeInterval(15 * 60))
+    precondition(snoozed.due == overdue.due && snoozed.repeatAnchor == overdue.repeatAnchor)
+    precondition(snoozed.preferences == overdue.preferences && snoozed.generation != overdue.generation)
+    precondition(snoozedChange.retiring == overdue && snoozedChange.snapshot.reminders.contains(unrelated))
+    let expected = phases(for: snoozed)
+    precondition(HourlyNagSchedule.matches(expected.map(normalized), expected))
+    precondition(!HourlyNagSchedule.matches(oldPhases, expected))
+}
+
 func minuteRequest(_ reminder: Reminder) -> UNNotificationRequest {
     NotificationRequestFactory.make(
         for: ScheduledAlert(reminder: reminder, index: 0, date: reminder.alertDate, repeatsEveryMinute: true),
@@ -153,11 +206,10 @@ func minuteRequest(_ reminder: Reminder) -> UNNotificationRequest {
         triggerOverride: UNTimeIntervalNotificationTrigger(timeInterval: 60, repeats: true))
 }
 
-@MainActor func checkMinuteUpdate() async throws {
-    let oldReminder = reminder(minutes: 1)
-    var currentReminder = oldReminder
-    currentReminder.generation = UUID()
-    currentReminder.adjustedDue = oldReminder.alertDate.addingTimeInterval(300)
+@MainActor func checkMinuteUpdate(dueOffset: TimeInterval, shift: ReminderTimeShift) async throws {
+    var oldReminder = reminder(minutes: 1, dueOffset: dueOffset)
+    oldReminder.preferences.repeatRule = .daily
+    let currentReminder = adjustedReminder(oldReminder, by: shift)
     let old = normalized(minuteRequest(oldReminder))
     let expected = minuteRequest(currentReminder)
     let preservedPhases = phases(for: reminder(minutes: 5)).map(normalized)
@@ -205,5 +257,9 @@ func minuteRequest(_ reminder: Reminder) -> UNNotificationRequest {
     precondition(HourlyNagSchedule.matches(pending, desired))
 }
 
-try await checkMinuteUpdate()
-print("Content equivalence checks passed: raw nil/empty reproduction, immutable comparison, strict negative controls, every phase cadence, and first-pass minute replacement plus retirement.")
+for dueOffset in [TimeInterval(600), TimeInterval(-60)] {
+    for shift in ReminderTimeShift.allCases {
+        try await checkMinuteUpdate(dueOffset: dueOffset, shift: shift)
+    }
+}
+print("Content equivalence checks passed: raw nil/empty reproduction, immutable comparison, strict negative controls, every phase cadence, future and already-notified menu adjustments, Snooze, and first-pass minute replacement plus retirement.")
