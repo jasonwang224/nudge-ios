@@ -34,19 +34,6 @@ struct NudgeSettings: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(15)
                 .nudgePanel(palette, fill: palette.sage)
-                VStack(alignment: .leading, spacing: 12) {
-                    Label("BACKUP", systemImage: "externaldrive").font(.caption.weight(.semibold))
-                    Text("Save your reminders, including completed items, to a JSON file. Import adds missing reminders and keeps your existing ones. Previously deleted reminders are skipped. App defaults and appearance stay unchanged.")
-                        .font(.footnote).foregroundStyle(palette.secondary)
-                    Button("Export reminders") {
-                        do {
-                            document = ReminderBackupDocument(data: try store.exportBackup())
-                            exporting = true
-                        } catch { message = "Could not export your reminders. Check the storage message and try again." }
-                    }
-                    Button("Import reminders") { importing = true }
-                }.padding(15).nudgePanel(palette)
-                Text(versionLabel).font(.footnote).foregroundStyle(palette.secondary)
                 if store.schedulingIssue != nil {
                     VStack(alignment: .leading, spacing: 10) {
                         Label("NOTIFICATION RECOVERY", systemImage: "bell.badge")
@@ -72,6 +59,19 @@ struct NudgeSettings: View {
                     }.pickerStyle(.segmented)
                 }
                 .padding(15).nudgePanel(palette)
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("BACKUP", systemImage: "externaldrive").font(.caption.weight(.semibold))
+                    Text("Save your reminders, including completed items, to a JSON file. Import adds missing reminders and keeps your existing ones. Previously deleted reminders are skipped. App defaults and appearance stay unchanged.")
+                        .font(.footnote).foregroundStyle(palette.secondary)
+                    Button("Export reminders") {
+                        do {
+                            document = ReminderBackupDocument(data: try store.exportBackup())
+                            exporting = true
+                        } catch { message = "Could not export your reminders. Check the storage message and try again." }
+                    }
+                    Button("Import reminders") { importing = true }
+                }.padding(15).nudgePanel(palette)
+                Text(versionLabel).font(.footnote).foregroundStyle(palette.secondary)
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 16)
