@@ -95,7 +95,7 @@ import ObjectiveC
         for card in after {
             guard let old = before.first(where: { $0.request.identifier == card.request.identifier }),
                   card.request.trigger == nil, abs(card.date.timeIntervalSince(old.date)) < 0.1,
-                  card.request.content.isEqual(old.request.content) else {
+                  NotificationContentEquivalence.equal(card.request.content, old.request.content) else {
                 throw Problem(message: "Could not protect an existing notification card. The schedule update was stopped; keep the app open to retry.")
             }
         }

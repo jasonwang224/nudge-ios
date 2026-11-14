@@ -56,7 +56,7 @@ enum HourlyNagSchedule {
         var remaining = actual
         for request in expected {
             guard let index = remaining.firstIndex(where: {
-                $0.identifier == request.identifier && $0.content.isEqual(request.content) &&
+                $0.identifier == request.identifier && NotificationContentEquivalence.equal($0.content, request.content) &&
                     (($0.trigger == nil && request.trigger == nil) || $0.trigger?.isEqual(request.trigger) == true)
             }) else { return false }
             remaining.remove(at: index)
@@ -79,7 +79,7 @@ enum HourlyNagSchedule {
         let changed: [ChangedRecord]
 
         var description: String {
-            var lines = ["Expected \(expectedCount) pending records; read back \(actualCount). Exact matches: \(exactMatchCount).",
+            var lines = ["Expected \(expectedCount) pending records; read back \(actualCount). Verified matches: \(exactMatchCount).",
                          "Missing: \(missing.count). Extra: \(extra.count). Changed: \(changed.count)."]
             lines += missing.map { "MISSING · \($0)" }
             lines += extra.map { "EXTRA · \($0)" }
@@ -92,8 +92,8 @@ enum HourlyNagSchedule {
         }
     }
 
-    // Diagnostics only. Exact matching above remains the acceptance criterion.
-    // Consume exact matches first, including repeated identifiers, before pairing
+    // Diagnostics use the same strict comparison and empty-text normalization as acceptance.
+    // Consume verified matches first, including repeated identifiers, before pairing
     // changed records by identifier + phase. A missing phase is never hidden by
     // an extra copy of a different phase with the same request identifier.
     static func mismatch(_ actual: [UNNotificationRequest], _ expected: [UNNotificationRequest]) -> Mismatch? {
@@ -101,7 +101,7 @@ enum HourlyNagSchedule {
         var unmatched: [UNNotificationRequest] = []
         for request in expected {
             if let index = remaining.firstIndex(where: {
-                $0.identifier == request.identifier && $0.content.isEqual(request.content) &&
+                $0.identifier == request.identifier && NotificationContentEquivalence.equal($0.content, request.content) &&
                     triggersEqual($0.trigger, request.trigger)
             }) {
                 remaining.remove(at: index)
@@ -113,7 +113,7 @@ enum HourlyNagSchedule {
         var changed: [ChangedRecord] = []
         for request in unmatched {
             let candidates = remaining.indices.filter { sameDiagnosticIdentity(remaining[$0], request) }
-            let index = candidates.first(where: { remaining[$0].content.isEqual(request.content) })
+            let index = candidates.first(where: { NotificationContentEquivalence.equal(remaining[$0].content, request.content) })
                 ?? candidates.first(where: { triggersEqual(remaining[$0].trigger, request.trigger) })
                 ?? candidates.first
             guard let index else { missing.append(recordLabel(request)); continue }
@@ -150,7 +150,7 @@ enum HourlyNagSchedule {
     }
 
     private static func changedContentFields(_ actual: UNNotificationContent, _ expected: UNNotificationContent) -> [String] {
-        guard !actual.isEqual(expected) else { return [] }
+        guard !NotificationContentEquivalence.equal(actual, expected) else { return [] }
         var fields: [String] = []
         if actual.title != expected.title { fields.append("title") }
         if actual.subtitle != expected.subtitle { fields.append("subtitle") }

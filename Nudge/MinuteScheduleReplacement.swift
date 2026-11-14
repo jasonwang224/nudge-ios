@@ -240,7 +240,7 @@ enum MinuteScheduleReplacement {
     #endif
 
     private static func equal(_ lhs: UNNotificationRequest, _ rhs: UNNotificationRequest) -> Bool {
-        lhs.identifier == rhs.identifier && lhs.content.isEqual(rhs.content)
+        lhs.identifier == rhs.identifier && NotificationContentEquivalence.equal(lhs.content, rhs.content)
             && ((lhs.trigger == nil && rhs.trigger == nil) || lhs.trigger?.isEqual(rhs.trigger) == true)
     }
 
