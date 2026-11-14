@@ -1,0 +1,25 @@
+import Foundation
+
+let now = Date(timeIntervalSince1970: 1_800_000_000)
+func label(_ seconds: TimeInterval) -> String {
+    UpNextCountdown.label(until: now.addingTimeInterval(seconds), now: now)
+}
+precondition(label(25 * 60) == "In 25 min")
+precondition(label(59) == "In <1 min")
+precondition(label(60) == "In 1 min")
+precondition(label(61) == "In 2 min")
+precondition(label(3_600) == "In 1 hr")
+precondition(label(5_100) == "In 1 hr 25 min")
+precondition(label(86_400) == "In 1 day")
+precondition(label(90_000) == "In 1 day 1 hr")
+precondition(label(172_800) == "In 2 days")
+precondition(label(0) == "Due now")
+precondition(label(-59) == "Due now")
+precondition(label(-60) == "1 min overdue")
+precondition(label(-300) == "5 min overdue")
+let original = now.addingTimeInterval(1_500)
+let adjusted = original.addingTimeInterval(300)
+precondition(UpNextCountdown.label(until: adjusted, now: now) == "In 30 min")
+precondition(UpNextCountdown.label(until: now.addingTimeInterval(900), now: now) == "In 15 min")
+precondition(UpNextCountdown.label(until: original, now: now.addingTimeInterval(60)) == "In 24 min")
+print("Countdown checks passed: boundaries, due/overdue, adjusted dates, snoozes, live time.")

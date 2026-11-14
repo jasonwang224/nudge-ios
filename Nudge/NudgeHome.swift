@@ -108,6 +108,7 @@ private struct NudgeAgenda: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var now = Date.now
     @State private var selectedDay: Date?
     @State private var showCompleted = false
@@ -410,18 +411,26 @@ private struct NudgeAgenda: View {
                 }.buttonStyle(.plain).accessibilityLabel("Done, " + reminder.title)
                 reminderMenu(current, now: now)
             }
-            Button { toggleTime(occurrence, current: current) } label: {
-                VStack(alignment: .leading, spacing: 7) {
-                    Text(current.date, style: .time).font(.largeTitle.weight(.medium).monospacedDigit())
-                    Text(reminder.title).font(.title3.weight(.semibold))
-                    Text(reminder.notes.isEmpty ? (reminder.preferences.notifications ? "We’ll give you a little nudge." : "Saved here with notifications off.") : reminder.notes)
-                        .font(.subheadline).foregroundStyle(palette.secondary).lineLimit(3)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-            }.buttonStyle(.plain)
-            .accessibilityValue(expanded ? "Expanded" : "Collapsed")
-            .accessibilityHint(expanded ? "Collapse time adjustments" : "Show time adjustments")
+            let layout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
+            layout {
+                Button { toggleTime(occurrence, current: current) } label: {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text(current.date, style: .time)
+                            .font(.largeTitle.weight(.medium).monospacedDigit())
+                            .lineLimit(1).minimumScaleFactor(0.75)
+                        Text(reminder.title).font(.title3.weight(.semibold))
+                        Text(reminder.notes.isEmpty ? (reminder.preferences.notifications ? "We’ll give you a little nudge." : "Saved here with notifications off.") : reminder.notes)
+                            .font(.subheadline).foregroundStyle(palette.secondary).lineLimit(3)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }.buttonStyle(.plain)
+                .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+                .accessibilityHint(expanded ? "Collapse time adjustments" : "Show time adjustments")
+                BellBuddy(date: current.date, palette: palette)
+            }
             Divider().overlay(palette.accent.opacity(0.25))
             let cadence = reminder.preferences.nagMinutes
             let alert = !reminder.preferences.notifications ? "Notifications off" : cadence == 0 ? "One gentle nudge" : "Every \(cadence) min"

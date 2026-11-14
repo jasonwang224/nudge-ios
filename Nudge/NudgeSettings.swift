@@ -54,7 +54,12 @@ struct NudgeSettings: View {
                     }
                     Button("Import reminders") { importing = true }
                 }.padding(15).nudgePanel(palette)
-                Text(versionLabel).font(.footnote).foregroundStyle(palette.secondary)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(versionLabel)
+                    Text("Developed by Jason Wang")
+                }
+                .font(.footnote)
+                .foregroundStyle(palette.secondary)
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 16)

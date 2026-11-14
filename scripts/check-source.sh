@@ -13,6 +13,7 @@ xcrun swiftc -typecheck -parse-as-library -module-name Nudge \
 
 models=(
     "$root/Nudge/Reminder.swift"
+    "$root/Nudge/UpNextCountdown.swift"
     "$root/Nudge/ReminderDatabase.swift"
     "$root/Nudge/ReminderEditorDraft.swift"
     "$root/Nudge/ReminderLifecycle.swift"
@@ -30,7 +31,7 @@ xcrun swiftc -framework UserNotifications "${models[@]}" "$root/Checks/main.swif
     -o "$check_dir/scheduling-checks"
 "$check_dir/scheduling-checks"
 
-for suite in Agenda AgendaUI Editor Lifecycle Interactions Calendar FiveMinute QuickAdjustment MinuteReplacement NotificationLog ContentEquivalence; do
+for suite in Countdown Agenda AgendaUI Editor Lifecycle Interactions Calendar FiveMinute QuickAdjustment MinuteReplacement NotificationLog ContentEquivalence; do
     xcrun swiftc -framework UserNotifications "${models[@]}" "$root/Checks/$suite/main.swift" \
         -o "$check_dir/$suite-checks"
     "$check_dir/$suite-checks"
