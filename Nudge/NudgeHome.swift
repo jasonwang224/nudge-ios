@@ -198,7 +198,7 @@ private struct NudgeAgenda: View {
         let upcoming = presentation.upcoming
 
         return ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 16) {
                 NudgeHeading(eyebrow: (todayOnly ? viewedDay : now).formatted(.dateTime.weekday(.wide).month(.wide).day()),
                              title: todayOnly ? (isToday ? "Today" : viewedDay.formatted(.dateTime.weekday(.wide))) : "Upcoming",
                              subtitle: "",
@@ -231,7 +231,10 @@ private struct NudgeAgenda: View {
                         .padding(12)
                         .nudgePanel(palette, fill: palette.coral)
                 }
-                HStack(spacing: 8) {
+                let filterLayout = dynamicTypeSize.isAccessibilitySize
+                    ? AnyLayout(VStackLayout(spacing: 6))
+                    : AnyLayout(HStackLayout(spacing: 8))
+                filterLayout {
                     filterButton(todayOnly ? "Reminders" : "Scheduled", count: visible.count, completed: false)
                     filterButton("Completed", count: completed.count, completed: true)
                 }
@@ -257,7 +260,7 @@ private struct NudgeAgenda: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             Button { newReminder(todayOnly ? viewedDay : nil) } label: {
                 Label("New reminder", systemImage: "plus")
-                    .font(.headline)
+                    .font(.headline).lineLimit(1).minimumScaleFactor(0.65)
                     .foregroundStyle(palette.scheme == .dark ? palette.canvas : .white)
                     .frame(maxWidth: .infinity, minHeight: 48)
                     .background(palette.accent, in: RoundedRectangle(cornerRadius: 17))
@@ -272,7 +275,7 @@ private struct NudgeAgenda: View {
 
     private func weekStrip(today: Date, viewedDay: Date, active: [Reminder], now: Date, calendar: Calendar) -> some View {
         let days = (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: today) }
-        return HStack(spacing: 5) {
+        let strip = HStack(spacing: 5) {
             ForEach(days, id: \.self) { day in
                 let selected = calendar.isDate(day, inSameDayAs: viewedDay)
                 let hasReminder = !ReminderOccurrence.entries(reminders: active, on: day, now: now, calendar: calendar).isEmpty
@@ -285,17 +288,24 @@ private struct NudgeAgenda: View {
                         Text(day.formatted(.dateTime.weekday(.abbreviated)))
                             .font(.caption2).lineLimit(1).minimumScaleFactor(0.75)
                         Text(day, format: .dateTime.day()).font(.subheadline.weight(.semibold))
+                            .lineLimit(1).minimumScaleFactor(0.8)
                         Circle().fill(hasReminder ? (selected ? palette.paper : palette.accent) : .clear)
                             .frame(width: 4, height: 4)
                     }
                     .foregroundStyle(selected ? palette.paper : palette.secondary)
                     .frame(maxWidth: .infinity, minHeight: 62)
+                    .frame(width: dynamicTypeSize.isAccessibilitySize ? 140 : nil)
                     .background(selected ? palette.ink : .clear, in: RoundedRectangle(cornerRadius: 16))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(day.formatted(.dateTime.weekday(.wide).month(.wide).day()))
                 .accessibilityAddTraits(selected ? .isSelected : [])
             }
+        }
+        return Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                ScrollView(.horizontal, showsIndicators: false) { strip }
+            } else { strip }
         }
     }
 
@@ -307,6 +317,7 @@ private struct NudgeAgenda: View {
         } label: {
             HStack(spacing: 5) {
                 Text(label).font(.subheadline.weight(selected ? .semibold : .regular))
+                    .lineLimit(1).minimumScaleFactor(0.8)
                 Text(count.formatted()).font(.caption.weight(.semibold)).monospacedDigit()
                     .padding(.horizontal, 6).padding(.vertical, 3)
                     .background(selected ? palette.coral : palette.canvas, in: Capsule())
@@ -417,7 +428,7 @@ private struct NudgeAgenda: View {
         let reminder = liveReminder(for: occurrence)
         let current = occurrence.isProjected ? ReminderOccurrence(reminder, projectedDate: occurrence.date) : ReminderOccurrence(reminder)
         let expanded = isExpanded(occurrence, reminder: reminder)
-        return VStack(alignment: .leading, spacing: 10) {
+        return VStack(alignment: .leading, spacing: 6) {
             HStack {
                 HStack(spacing: 7) {
                     Circle().fill(palette.accent).frame(width: 6, height: 6)
@@ -481,7 +492,7 @@ private struct NudgeAgenda: View {
                     .transition(quickTimeTransition)
             }
         }
-        .padding(16)
+        .padding(14)
         .nudgePanel(palette, fill: palette.coral, radius: 24)
         .id(occurrence.id)
         .transition(.opacity)

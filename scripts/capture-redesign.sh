@@ -20,14 +20,19 @@ s=p.read_text()
 s=s.replace('@State private var tab: Tab = .today',
             '@State private var tab: Tab = CommandLine.arguments.contains("--settings") ? .settings : .today')
 s=s.replace('@State private var editor: EditorItem?',
-            '@State private var editor: EditorItem? = CommandLine.arguments.contains("--editor") ? EditorItem() : nil')
+            '@State private var editor: EditorItem? = (CommandLine.arguments.contains("--editor") || CommandLine.arguments.contains("--custom")) ? EditorItem() : nil')
+s=s.replace('@State private var pendingCompletion: ReminderOccurrence?',
+    '@State private var pendingCompletion: ReminderOccurrence? = CommandLine.arguments.contains("--complete") ? ReminderStore.shared.reminders.first.map { ReminderOccurrence($0) } : nil')
+s=s.replace('.onReceive(Self.clock)', '.onAppear { if CommandLine.arguments.contains("--adjust"), let reminder = store.reminders.first { openTime(ReminderOccurrence(reminder)) } }\n        .onReceive(Self.clock)')
 p.write_text(s)
 p=root/'Nudge/NudgeApp.swift'
 s=p.read_text().replace('.task { store.refresh() }', '')
 s=s.replace('if phase == .active { store.refresh() }', '')
 p.write_text(s)
 p=root/'Nudge/ReminderEditor.swift'
-p.write_text(p.read_text().replace('reminder?.title ?? ""', 'reminder?.title ?? "Pick up groceries"'))
+s=p.read_text().replace('reminder?.title ?? ""', 'reminder?.title ?? "Pick up groceries"')
+s=s.replace('initialPreferences.notifications = true', 'initialPreferences.notifications = true; if CommandLine.arguments.contains("--custom") { initialPreferences.repeatRule = .custom }')
+p.write_text(s)
 PY
 xcodebuild -project "$tmp/Nudge.xcodeproj" -target Nudge -configuration Debug \
   -sdk iphonesimulator "CONFIGURATION_BUILD_DIR=$tmp/products" "OBJROOT=$tmp/obj" \
@@ -67,7 +72,7 @@ sources=()
 for name in "${models[@]}"; do sources+=("$root/Nudge/$name.swift"); done
 xcrun swiftc -framework UserNotifications "${sources[@]}" "$tmp/main.swift" -o "$tmp/fixtures"
 "$tmp/fixtures" "$data/Library/Application Support/Nudge/Reminders-v1.json"
-for screen in today settings editor; do
+for screen in today settings editor custom adjust complete; do
   xcrun simctl terminate "$device" com.jasonwang224.nudge >/dev/null 2>&1 || true
   xcrun simctl launch "$device" com.jasonwang224.nudge "--$screen"
   sleep 3
@@ -84,3 +89,8 @@ xcrun simctl ui "$device" content_size accessibility-extra-extra-extra-large
 xcrun simctl launch "$device" com.jasonwang224.nudge --today
 sleep 3
 xcrun simctl io "$device" screenshot "$root/artifacts/redesign/today-accessibility.png"
+
+xcrun simctl terminate "$device" com.jasonwang224.nudge >/dev/null 2>&1 || true
+xcrun simctl launch "$device" com.jasonwang224.nudge --settings
+sleep 3
+xcrun simctl io "$device" screenshot "$root/artifacts/redesign/settings-accessibility.png"

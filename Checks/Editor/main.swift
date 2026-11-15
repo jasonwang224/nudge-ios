@@ -253,3 +253,18 @@ expect(repairedClock.due == date(2026, 11, 8, 9, 30) && repairedClock.phoneSched
        "Explicit clock change did not repair the ambiguous schedule")
 
 print("Editor time/AM-PM, validation, defaults isolation, repeat anchors, snooze preservation, legacy editing, date shortcuts, calendar identity, and DST checks passed.")
+
+
+// Old saved defaults and edited alerts-off records cannot recreate a hidden off mode.
+var oldAlertsOffDefaults = ReminderPreferences()
+oldAlertsOffDefaults.notifications = false
+let alwaysOnDraft = try draft(preferences: oldAlertsOffDefaults)
+expect(alwaysOnDraft.preferences.notifications, "New reminders must always request notifications.")
+var oldAlertsOffReminder = alwaysOnDraft
+oldAlertsOffReminder.preferences.notifications = false
+let enabledEdit = try draft(original: oldAlertsOffReminder, title: oldAlertsOffReminder.title,
+                            day: tomorrow, time: "830", preferences: oldAlertsOffDefaults)
+expect(enabledEdit.preferences.notifications, "Editing an older alerts-off reminder must enable notifications.")
+expect(enabledEdit.id == oldAlertsOffReminder.id && enabledEdit.due == oldAlertsOffReminder.due,
+       "Enabling an edited reminder must preserve its identity and due time.")
+print("Editor always-on notification policy checks passed.")

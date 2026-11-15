@@ -85,17 +85,25 @@ struct NudgeSettingsRow<Trailing: View>: View {
     let icon: String
     let palette: NudgePalette
     @ViewBuilder var trailing: () -> Trailing
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon).font(.subheadline).foregroundStyle(palette.secondary)
-                .frame(width: 22).accessibilityHidden(true)
-            Text(title).font(.subheadline)
-            Spacer(minLength: 6)
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(spacing: 10))
+        layout {
+            HStack(spacing: 10) {
+                Image(systemName: icon).font(.subheadline).foregroundStyle(palette.secondary)
+                    .frame(width: 22).accessibilityHidden(true)
+                Text(title).font(.subheadline).fixedSize(horizontal: false, vertical: true)
+            }
+            if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 6) }
             trailing()
+                .font(.subheadline)
+                .fixedSize(horizontal: !dynamicTypeSize.isAccessibilitySize, vertical: true)
         }
         .foregroundStyle(palette.ink)
-        .padding(.horizontal, 14).padding(.vertical, 4)
+        .padding(.horizontal, 14).padding(.vertical, 5)
         .frame(minHeight: 50)
     }
 }
@@ -132,6 +140,7 @@ struct PreferenceFields: View {
                         ForEach(RepeatRule.allCases) { rule in Text(rule.rawValue).tag(rule) }
                     }
                     .pickerStyle(.menu).labelsHidden().tint(palette.secondary)
+                    .font(.subheadline).lineLimit(1).minimumScaleFactor(0.8)
                 }
                 if preferences.repeatRule == .custom { customDays }
                 ruleDivider
@@ -154,7 +163,7 @@ struct PreferenceFields: View {
                 }
             }
             .nudgePanel(palette)
-            Text(isDefaults ? "Applied to reminders you create next." : "Snooze pauses nags for 15 minutes.")
+            Text(isDefaults ? "Applied to reminders you create next." : (preferences.nagMinutes == 0 ? "Nag me is off: one notification. Snooze pauses it for 15 minutes." : "Snooze pauses nags for 15 minutes."))
                 .font(.caption).foregroundStyle(palette.secondary)
                 .padding(.horizontal, 3)
         }

@@ -11,7 +11,7 @@ struct BellBuddy: View {
     var body: some View {
         VStack(spacing: 0) {
             BellBuddyArtwork(active: visible && scenePhase == .active, accent: UIColor(palette.accent))
-                .frame(width: 110, height: 116)
+                .frame(width: 104, height: 96)
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 Text(UpNextCountdown.label(until: date, now: context.date))
                     .font(.caption.weight(.semibold))
@@ -22,7 +22,7 @@ struct BellBuddy: View {
                     .accessibilityValue(UpNextCountdown.label(until: date, now: context.date))
             }
         }
-        .frame(width: 110)
+        .frame(width: 104)
         .onAppear { visible = true }
         .onDisappear { visible = false }
     }
