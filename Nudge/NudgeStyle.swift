@@ -165,10 +165,14 @@ struct PreferenceFields: View {
                     ruleDivider
                 }
                 NudgeSettingsRow(title: "Sound", icon: "speaker.wave.2", palette: palette) {
-                    Picker("Sound", selection: $preferences.sound) {
-                        ForEach(AlertSound.allCases) { sound in Text(sound.rawValue).tag(sound) }
+                    Menu {
+                        Picker("Sound", selection: $preferences.sound) {
+                            ForEach(AlertSound.allCases) { sound in Text(sound.rawValue).tag(sound) }
+                        }
+                    } label: {
+                        NudgeMenuValue(value: preferences.sound.rawValue, palette: palette)
                     }
-                    .pickerStyle(.menu).labelsHidden().tint(palette.secondary)
+                    .accessibilityLabel("Sound, " + preferences.sound.rawValue)
                     Button { soundPreview.play(preferences.sound) } label: {
                         Image(systemName: "play.circle")
                             .font(.title3).frame(width: 44, height: 44)
@@ -192,12 +196,17 @@ struct PreferenceFields: View {
 
     private var nagRow: some View {
         NudgeSettingsRow(title: "Nag me", icon: "bell", palette: palette) {
-            Picker("Nag me", selection: $preferences.nagMinutes) {
-                ForEach(ReminderPreferences.nagIntervals, id: \.self) { minutes in
-                    Text(minutes == 0 ? "Off" : "Every \(minutes) min").tag(minutes)
+            Menu {
+                Picker("Nag me", selection: $preferences.nagMinutes) {
+                    ForEach(ReminderPreferences.nagIntervals, id: \.self) { minutes in
+                        Text(minutes == 0 ? "Off" : "Every \(minutes) min").tag(minutes)
+                    }
                 }
+            } label: {
+                NudgeMenuValue(value: preferences.nagMinutes == 0 ? "Off" : "Every \(preferences.nagMinutes) min",
+                               palette: palette)
             }
-            .pickerStyle(.menu).labelsHidden().tint(palette.secondary)
+            .accessibilityLabel(preferences.nagMinutes == 0 ? "Nag me, off" : "Nag me, every \(preferences.nagMinutes) minutes")
         }
     }
 
