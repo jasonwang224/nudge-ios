@@ -710,13 +710,17 @@ private struct CompletionConfirmation: View {
             .padding(25)
             Divider().overlay(palette.line)
             HStack(spacing: 0) {
-                Button("Cancel", role: .cancel, action: cancel)
-                    .font(.subheadline).foregroundStyle(palette.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 51)
+                Button(role: .cancel, action: cancel) {
+                    Text("Cancel").font(.subheadline).foregroundStyle(palette.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 51)
+                        .contentShape(Rectangle())
+                }
                 Rectangle().fill(palette.line).frame(width: 1, height: 51)
-                Button("Done", action: confirm)
-                    .font(.subheadline.weight(.semibold)).foregroundStyle(palette.accent)
-                    .frame(maxWidth: .infinity, minHeight: 51)
+                Button(action: confirm) {
+                    Text("Done").font(.subheadline.weight(.semibold)).foregroundStyle(palette.accent)
+                        .frame(maxWidth: .infinity, minHeight: 51)
+                        .contentShape(Rectangle())
+                }
             }.buttonStyle(.plain)
         }
     }
