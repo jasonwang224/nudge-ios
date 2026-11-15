@@ -94,7 +94,7 @@ struct NudgeSettingsRow<Trailing: View>: View {
         layout {
             HStack(spacing: 10) {
                 Image(systemName: icon).font(.subheadline).foregroundStyle(palette.secondary)
-                    .frame(width: 22).accessibilityHidden(true)
+                    .frame(width: dynamicTypeSize.isAccessibilitySize ? nil : 22).accessibilityHidden(true)
                 Text(title).font(.subheadline).fixedSize(horizontal: false, vertical: true)
             }
             if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 6) }
@@ -105,6 +105,19 @@ struct NudgeSettingsRow<Trailing: View>: View {
         .foregroundStyle(palette.ink)
         .padding(.horizontal, 14).padding(.vertical, 5)
         .frame(minHeight: 50)
+    }
+}
+
+struct NudgeMenuValue: View {
+    let value: String
+    let palette: NudgePalette
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(value).font(.subheadline).lineLimit(1).minimumScaleFactor(0.65)
+            Image(systemName: "chevron.right").font(.caption2).accessibilityHidden(true)
+        }
+        .foregroundStyle(palette.secondary)
+        .frame(minHeight: 44).contentShape(Rectangle())
     }
 }
 
@@ -136,11 +149,14 @@ struct PreferenceFields: View {
                     ruleDivider
                 }
                 NudgeSettingsRow(title: "Repeat", icon: "repeat", palette: palette) {
-                    Picker("Repeat", selection: $preferences.repeatRule) {
-                        ForEach(RepeatRule.allCases) { rule in Text(rule.rawValue).tag(rule) }
+                    Menu {
+                        Picker("Repeat", selection: $preferences.repeatRule) {
+                            ForEach(RepeatRule.allCases) { rule in Text(rule.rawValue).tag(rule) }
+                        }
+                    } label: {
+                        NudgeMenuValue(value: preferences.repeatRule.rawValue, palette: palette)
                     }
-                    .pickerStyle(.menu).labelsHidden().tint(palette.secondary)
-                    .font(.subheadline).lineLimit(1).minimumScaleFactor(0.8)
+                    .accessibilityLabel("Repeat, " + preferences.repeatRule.rawValue)
                 }
                 if preferences.repeatRule == .custom { customDays }
                 ruleDivider

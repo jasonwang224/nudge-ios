@@ -49,9 +49,14 @@ struct NudgeSettings: View {
                         .font(.caption).foregroundStyle(palette.secondary).padding(.horizontal, 3)
                 }
                 NudgeSettingsRow(title: "Appearance", icon: "moon", palette: palette) {
-                    Picker("Appearance", selection: $appearance) {
-                        ForEach(NudgeAppearance.allCases) { style in Text(style.rawValue).tag(style) }
-                    }.pickerStyle(.menu).labelsHidden().tint(palette.secondary)
+                    Menu {
+                        Picker("Appearance", selection: $appearance) {
+                            ForEach(NudgeAppearance.allCases) { style in Text(style.rawValue).tag(style) }
+                        }
+                    } label: {
+                        NudgeMenuValue(value: appearance.rawValue, palette: palette)
+                    }
+                    .accessibilityLabel("Appearance, " + appearance.rawValue)
                 }.nudgePanel(palette)
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
