@@ -511,7 +511,7 @@ private struct NudgeAgenda: View {
         let formatter = DateFormatter()
         formatter.locale = .autoupdatingCurrent
         var text = AttributedString(date.formatted(date: .omitted, time: .shortened))
-        for symbol in [formatter.amSymbol, formatter.pmSymbol] where !symbol.isEmpty {
+        for symbol in [formatter.amSymbol, formatter.pmSymbol].compactMap({ $0 }) where !symbol.isEmpty {
             if let range = text.range(of: symbol) {
                 text[range].font = .system(size: heroPeriodSize, weight: .semibold)
             }
