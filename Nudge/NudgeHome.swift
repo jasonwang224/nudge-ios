@@ -381,7 +381,7 @@ private struct NudgeAgenda: View {
                     else { confirmCompletion(current) }
                 } label: {
                     Image(systemName: completed ? "checkmark.circle.fill" : "circle")
-                        .font(.title3)
+                        .font(.system(size: 22))
                         .foregroundStyle(completed ? palette.green : palette.accent)
                         .frame(width: 44, height: 44)
                 }
@@ -445,7 +445,7 @@ private struct NudgeAgenda: View {
                 .foregroundStyle(palette.accent)
                 Spacer()
                 Button { confirmCompletion(current) } label: {
-                    Image(systemName: "checkmark.circle").font(.title2)
+                    Image(systemName: "checkmark.circle").font(.system(size: 24))
                         .frame(width: 44, height: 44)
                 }.buttonStyle(.plain).accessibilityLabel("Done, " + reminder.title)
                 reminderMenu(current, now: now)
@@ -637,7 +637,7 @@ private struct NudgeAgenda: View {
             Button(!completed && reminder.preferences.repeatRule != .never ? "Delete repeating reminder" : "Delete",
                    systemImage: "trash", role: .destructive) { pendingDelete = reminder }
         } label: {
-            Image(systemName: "ellipsis").frame(width: 44, height: 44)
+            Image(systemName: "ellipsis").font(.system(size: 20)).frame(width: 44, height: 44)
                 .foregroundStyle(palette.secondary)
         }
         .accessibilityLabel("Options for " + reminder.title)
@@ -697,7 +697,7 @@ private struct CompletionConfirmation: View {
     private var messageContent: some View {
         VStack(spacing: 15) {
             Image(systemName: "checkmark")
-                .font(.title2.weight(.medium))
+                .font(.system(size: 22, weight: .medium))
                 .foregroundStyle(palette.accent)
                 .frame(width: 43, height: 43)
                 .background(palette.coral, in: Circle())
