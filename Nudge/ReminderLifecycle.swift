@@ -66,7 +66,11 @@ enum ReminderLifecycle {
         guard let index = currentIndex(reminder, in: snapshot) else { return nil }
         let previous = snapshot.reminders[index]
         let next = previous.nextOccurrence(after: now, calendar: calendar)
-        guard previous.preferences.repeatRule == .never || next != nil else { return nil }
+        // Legacy/imported custom repeats can have no selected weekdays. There is
+        // no next occurrence in that case, but Done must still complete this one
+        // into history without dropping its fields or inventing repeat days.
+        let hasNoRepeatDays = previous.preferences.repeatRule == .custom && previous.preferences.weekdays.isEmpty
+        guard previous.preferences.repeatRule == .never || hasNoRepeatDays || next != nil else { return nil }
         let nextGeneration = UUID()
         guard observedGenerations.allSatisfy({ token in
             guard let request = PendingNudge("nudge.\(token).0") else { return false }

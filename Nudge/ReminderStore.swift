@@ -68,11 +68,7 @@ final class ReminderStore: ObservableObject {
 
     func exportBackup() throws -> Data {
         guard loadDatabase() else { throw ReminderDatabase.Problem.missing }
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(ReminderBackup(snapshot: snapshot))
-        _ = try ReminderBackup.decode(data)
-        return data
+        return try ReminderBackup.encode(snapshot: snapshot)
     }
 
     func importBackup(_ backup: ReminderBackup) -> String {

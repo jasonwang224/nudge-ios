@@ -31,7 +31,7 @@ xcrun swiftc -framework UserNotifications "${models[@]}" "$root/Checks/main.swif
     -o "$check_dir/scheduling-checks"
 "$check_dir/scheduling-checks"
 
-for suite in Countdown Agenda AgendaUI Editor Lifecycle Interactions Calendar FiveMinute QuickAdjustment MinuteReplacement NotificationLog ContentEquivalence; do
+for suite in DatabaseSafety Countdown Agenda AgendaUI Editor Lifecycle Interactions Calendar FiveMinute QuickAdjustment MinuteReplacement NotificationLog ContentEquivalence; do
     xcrun swiftc -framework UserNotifications "${models[@]}" "$root/Checks/$suite/main.swift" \
         -o "$check_dir/$suite-checks"
     "$check_dir/$suite-checks"

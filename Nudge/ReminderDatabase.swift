@@ -28,7 +28,7 @@ struct ReminderSnapshot: Codable, Equatable {
 
 struct ReminderDatabase {
     enum Problem: Error {
-        case invalid, missing, changed
+        case invalid, missing, changed, destructiveChange
     }
 
     enum Source: Equatable {
@@ -64,7 +64,22 @@ struct ReminderDatabase {
     func commit(_ snapshot: ReminderSnapshot, replacing source: Source) throws -> Source {
         // A vanished, unreadable, or changed file must never be replaced by in-memory data.
         guard try read() == source else { throw Problem.changed }
-        let bytes = try JSONEncoder().encode(snapshot.validated())
+        let checked = try snapshot.validated()
+        let previous: ReminderSnapshot
+        switch source {
+        case .missing: previous = ReminderSnapshot()
+        case .legacy(let existing), .file(let existing): previous = existing
+        }
+        // A syntactically valid snapshot can still accidentally omit every record.
+        // Only explicit deletion tombstones authorize disappearance; retain all
+        // cancellation bookkeeping so a later import cannot resurrect deleted data.
+        let removed = Set(previous.reminders.map(\.id)).subtracting(checked.reminders.map(\.id))
+        guard removed.isSubset(of: checked.deletedIDs),
+              previous.deletedIDs.isSubset(of: checked.deletedIDs),
+              (previous.stoppedNotificationGenerations ?? []).isSubset(of: checked.stoppedNotificationGenerations ?? []) else {
+            throw Problem.destructiveChange
+        }
+        let bytes = try JSONEncoder().encode(checked)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         var options: Data.WritingOptions = [.atomic]
         #if os(iOS)
@@ -89,17 +104,30 @@ struct ReminderBackup: Codable {
         reminders = snapshot.reminders
     }
 
+    static func encode(snapshot: ReminderSnapshot) throws -> Data {
+        // History and successive imports can exceed the size of any single import.
+        // Never truncate or refuse a valid database merely because it has grown.
+        let backup = Self(snapshot: try snapshot.validated())
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return try encoder.encode(backup)
+    }
+
     static func decode(_ data: Data) throws -> Self {
-        guard data.count <= 10_000_000 else { throw ReminderDatabase.Problem.invalid }
         let backup = try JSONDecoder().decode(Self.self, from: data)
-        guard backup.format == "reminder-backup", backup.version == 1,
-              backup.reminders.count <= 10_000 else { throw ReminderDatabase.Problem.invalid }
-        _ = try ReminderSnapshot(reminders: backup.reminders).validated()
+        try backup.validateForImport()
         return backup
     }
 
-    func merging(into current: ReminderSnapshot) throws -> ReminderSnapshot {
+    private func validateForImport() throws {
+        guard format == "reminder-backup", version == 1 else {
+            throw ReminderDatabase.Problem.invalid
+        }
         _ = try ReminderSnapshot(reminders: reminders).validated()
+    }
+
+    func merging(into current: ReminderSnapshot) throws -> ReminderSnapshot {
+        try validateForImport()
         var merged = current
         let known = Set(current.reminders.map(\.id)).union(current.deletedIDs)
         merged.reminders += reminders.filter { !known.contains($0.id) }.map {

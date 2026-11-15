@@ -76,11 +76,11 @@ struct NudgeSettings: View {
                 let url = try result.get()
                 let access = url.startAccessingSecurityScopedResource()
                 defer { if access { url.stopAccessingSecurityScopedResource() } }
-                let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-                guard size <= 10_000_000 else { throw ReminderDatabase.Problem.invalid }
-                pendingBackup = try ReminderBackup.decode(Data(contentsOf: url))
+                // Map larger exports where possible. Decode and validate the complete
+                // backup before offering Import; no storage writes happen here.
+                pendingBackup = try ReminderBackup.decode(Data(contentsOf: url, options: .mappedIfSafe))
                 confirming = true
-            } catch { message = "Choose a valid reminder backup exported by this app (up to 10 MB). Nothing was changed." }
+            } catch { message = "Choose a valid reminder backup exported by this app. Nothing was changed." }
         }
         .confirmationDialog("Import \(pendingBackup?.reminders.count ?? 0) reminders?",
                             isPresented: $confirming, titleVisibility: .visible) {
