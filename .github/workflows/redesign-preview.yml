@@ -1,0 +1,22 @@
+name: Validate native redesign
+on:
+  push:
+    branches: ['checks/redesign-20261115']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  preview:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Capture native iPhone 11 Pro layouts
+        run: bash scripts/capture-redesign.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-redesign-previews
+          path: artifacts/redesign/*.png
+          if-no-files-found: warn
+          retention-days: 14

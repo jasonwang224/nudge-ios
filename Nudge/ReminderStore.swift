@@ -52,6 +52,7 @@ final class ReminderStore: ObservableObject {
         defaults = disk.data(forKey: Self.defaultsKey)
             .flatMap { try? JSONDecoder().decode(ReminderPreferences.self, from: $0) }
             .flatMap { ReminderPreferences.nagIntervals.contains($0.nagMinutes) ? $0 : nil } ?? ReminderPreferences()
+        defaults.notifications = true
         _ = loadDatabase()
     }
 
@@ -195,9 +196,10 @@ final class ReminderStore: ObservableObject {
 
     func refresh() {
         if loadDatabase() {
-            let adjusted = ReminderLifecycle.refreshingSchedules(in: snapshot)
+            let refreshed = ReminderLifecycle.refreshingSchedules(in: snapshot)
+            let adjusted = ReminderLifecycle.enablingNotifications(in: refreshed)
             if adjusted != snapshot {
-                commit(adjusted)
+                commit(adjusted, askPermission: adjusted != refreshed)
                 return
             }
         }
@@ -255,7 +257,7 @@ final class ReminderStore: ObservableObject {
             return message
         }
         guard let source else { return storageIssue ?? "Open Nudge and wait for your reminders to finish loading." }
-        let prepared = NagDelivery.prepare(changed, replacing: snapshot, now: .now)
+        let prepared = NagDelivery.prepare(ReminderLifecycle.enablingNotifications(in: changed), replacing: snapshot, now: .now)
         do {
             self.source = try database.commit(prepared, replacing: source)
         } catch {

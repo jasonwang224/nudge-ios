@@ -63,7 +63,7 @@ struct NudgeHome: View {
             Button("Cancel", role: .cancel) {}
             Button("Done") { Task { await store.done(occurrence, animation: reminderAnimation) } }
         } message: { occurrence in
-            Text("\(occurrence.reminder.title)\n\(occurrence.date.formatted(date: .abbreviated, time: .shortened))")
+            Text(completionMessage(for: occurrence))
         }
         .onChange(of: store.notificationOpen, initial: true) { _, request in
             guard let request, let reminder = store.reminders.first(where: {
@@ -76,6 +76,13 @@ struct NudgeHome: View {
             notificationRequest = request
             tab = destination
         }
+    }
+
+    private func completionMessage(for occurrence: ReminderOccurrence) -> String {
+        let date = occurrence.date.formatted(date: .abbreviated, time: .shortened)
+        let detail = "Complete “\(occurrence.reminder.title)” for \(date)?"
+        return occurrence.reminder.preferences.repeatRule == .never
+            ? detail : detail + "\nOnly this occurrence will be completed. Future repeats will continue."
     }
 
     private func agenda(todayOnly: Bool, palette: NudgePalette) -> some View {
@@ -193,8 +200,8 @@ private struct NudgeAgenda: View {
         return ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 NudgeHeading(eyebrow: (todayOnly ? viewedDay : now).formatted(.dateTime.weekday(.wide).month(.wide).day()),
-                             title: todayOnly ? (isToday ? "Hello, today." : viewedDay.formatted(.dateTime.weekday(.wide)) + ".") : "On the horizon.",
-                             subtitle: todayOnly ? "A little more headspace starts here." : "A little planning. A lot of peace of mind.",
+                             title: todayOnly ? (isToday ? "Today" : viewedDay.formatted(.dateTime.weekday(.wide))) : "Upcoming",
+                             subtitle: "",
                              icon: todayOnly ? "sun.max" : "calendar", palette: palette)
                 if todayOnly {
                     weekStrip(today: today, viewedDay: viewedDay, active: active, now: now, calendar: calendar)
@@ -230,7 +237,7 @@ private struct NudgeAgenda: View {
                 }
                 if showCompleted {
                     if completed.isEmpty { emptyState(completed: true) }
-                    else { reminderSection("LOOK AT YOU GO", icon: "checkmark.circle", items: completed.map { ReminderOccurrence($0) }, now: now) }
+                    else { reminderSection("Completed", icon: "checkmark.circle", items: completed.map { ReminderOccurrence($0) }, now: now) }
                 } else if visible.isEmpty {
                     emptyState(completed: false)
                 } else {
@@ -239,11 +246,11 @@ private struct NudgeAgenda: View {
                     if let next = upcoming.first {
                         nextCard(next, now: now)
                     }
-                    reminderSection(todayOnly ? "A LITTLE LATER" : "COMING UP", icon: "calendar",
+                    reminderSection(todayOnly ? (isToday ? "Later today" : "Later that day") : "Coming up", icon: "calendar",
                                     items: Array(upcoming.dropFirst()), now: now)
                 }
             }
-            .padding(.horizontal, 18)
+            .padding(.horizontal, 20)
             .padding(.vertical, 16)
             .animation(reminderAnimation, value: expandedTime?.id)
         }
@@ -253,10 +260,10 @@ private struct NudgeAgenda: View {
                     .font(.headline)
                     .foregroundStyle(palette.scheme == .dark ? palette.canvas : .white)
                     .frame(maxWidth: .infinity, minHeight: 48)
-                    .background(palette.accent, in: RoundedRectangle(cornerRadius: 15))
+                    .background(palette.accent, in: RoundedRectangle(cornerRadius: 17))
             }
             .buttonStyle(.plain)
-            .padding(.horizontal, 18)
+            .padding(.horizontal, 20)
             .padding(.vertical, 9)
             .background(palette.paper)
         }
@@ -275,15 +282,15 @@ private struct NudgeAgenda: View {
                     closeTime()
                 } label: {
                     VStack(spacing: 5) {
-                        Text(String(day.formatted(.dateTime.weekday(.abbreviated)).prefix(1)))
-                            .font(.caption)
+                        Text(day.formatted(.dateTime.weekday(.abbreviated)))
+                            .font(.caption2).lineLimit(1).minimumScaleFactor(0.75)
                         Text(day, format: .dateTime.day()).font(.subheadline.weight(.semibold))
                         Circle().fill(hasReminder ? (selected ? palette.paper : palette.accent) : .clear)
                             .frame(width: 4, height: 4)
                     }
                     .foregroundStyle(selected ? palette.paper : palette.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 54)
-                    .background(selected ? palette.ink : palette.canvas, in: RoundedRectangle(cornerRadius: 12))
+                    .frame(maxWidth: .infinity, minHeight: 62)
+                    .background(selected ? palette.ink : .clear, in: RoundedRectangle(cornerRadius: 16))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(day.formatted(.dateTime.weekday(.wide).month(.wide).day()))
@@ -306,7 +313,10 @@ private struct NudgeAgenda: View {
             }
             .foregroundStyle(selected ? palette.ink : palette.secondary)
             .frame(maxWidth: .infinity, minHeight: 44)
-            .background(selected ? palette.surface : palette.paper, in: RoundedRectangle(cornerRadius: 11))
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(selected ? palette.accent.opacity(0.55) : palette.line)
+                    .frame(height: selected ? 2 : 1)
+            }
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -315,21 +325,26 @@ private struct NudgeAgenda: View {
     @ViewBuilder
     private func reminderSection(_ title: String, icon: String, items: [ReminderOccurrence], now: Date) -> some View {
         if !items.isEmpty {
-            VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Label(title, systemImage: icon).font(.subheadline.weight(.semibold))
+                    Text(title).font(.subheadline.weight(.semibold)).accessibilityAddTraits(.isHeader)
                     Spacer()
                     Text(items.count.formatted()).font(.caption).foregroundStyle(palette.secondary)
-                }.padding(13)
-                ForEach(items) { reminder in
-                    VStack(spacing: 0) {
-                        Divider().overlay(palette.line)
-                        reminderRow(reminder, now: now)
-                    }
-                    .transition(.opacity)
                 }
+                .padding(.horizontal, 3)
+                VStack(spacing: 0) {
+                    ForEach(items) { occurrence in
+                        VStack(spacing: 0) {
+                            if occurrence.id != items.first?.id {
+                                Divider().overlay(palette.line.opacity(0.5)).padding(.horizontal, 14)
+                            }
+                            reminderRow(occurrence, now: now)
+                        }
+                        .transition(.opacity)
+                    }
+                }
+                .nudgePanel(palette)
             }
-            .nudgePanel(palette)
             .transition(.opacity)
         }
     }
@@ -369,7 +384,7 @@ private struct NudgeAgenda: View {
                 .accessibilityHint(expanded ? "Collapse time adjustments" : "Show time adjustments")
                 reminderMenu(current, now: now)
             }
-            .padding(.vertical, 3)
+            .padding(.vertical, 7)
             .padding(.horizontal, 4)
             if expanded {
                 quickTimeMenu(current, now: now)
@@ -392,7 +407,9 @@ private struct NudgeAgenda: View {
             let date: Date.FormatStyle.DateStyle = Calendar.autoupdatingCurrent.isDate(snooze, inSameDayAs: now) ? .omitted : .abbreviated
             return (snooze > now ? "Snoozed until " : "Snooze ended ") + snooze.formatted(date: date, time: .shortened)
         }
-        let date = occurrence.date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute())
+        let date = Calendar.autoupdatingCurrent.isDate(occurrence.date, inSameDayAs: now)
+            ? occurrence.date.formatted(date: .omitted, time: .shortened)
+            : occurrence.date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute())
         return reminder.preferences.repeatRule == .never ? date : date + " · " + reminder.preferences.repeatRule.rawValue
     }
 
@@ -402,8 +419,11 @@ private struct NudgeAgenda: View {
         let expanded = isExpanded(occurrence, reminder: reminder)
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("UP NEXT", systemImage: "circle.fill")
-                    .font(.caption.weight(.semibold)).tracking(1).foregroundStyle(palette.accent)
+                HStack(spacing: 7) {
+                    Circle().fill(palette.accent).frame(width: 6, height: 6)
+                    Text("Up next").font(.caption.weight(.semibold))
+                }
+                .foregroundStyle(palette.accent)
                 Spacer()
                 Button { confirmCompletion(current) } label: {
                     Image(systemName: "checkmark.circle").font(.title2)
@@ -418,11 +438,17 @@ private struct NudgeAgenda: View {
                 Button { toggleTime(occurrence, current: current) } label: {
                     VStack(alignment: .leading, spacing: 7) {
                         Text(current.date, style: .time)
-                            .font(.largeTitle.weight(.medium).monospacedDigit())
+                            .font(.largeTitle.weight(.semibold).monospacedDigit())
                             .lineLimit(1).minimumScaleFactor(0.75)
                         Text(reminder.title).font(.title3.weight(.semibold))
-                        Text(reminder.notes.isEmpty ? (reminder.preferences.notifications ? "We’ll give you a little nudge." : "Saved here with notifications off.") : reminder.notes)
-                            .font(.subheadline).foregroundStyle(palette.secondary).lineLimit(3)
+                        if reminder.preferences.repeatRule != .never {
+                            Text(reminder.preferences.repeatRule.rawValue)
+                                .font(.caption).foregroundStyle(palette.secondary)
+                        }
+                        if !reminder.notes.isEmpty {
+                            Text(reminder.notes).font(.subheadline)
+                                .foregroundStyle(palette.secondary).lineLimit(3)
+                        }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
@@ -433,8 +459,19 @@ private struct NudgeAgenda: View {
             }
             Divider().overlay(palette.accent.opacity(0.25))
             let cadence = reminder.preferences.nagMinutes
-            let alert = !reminder.preferences.notifications ? "Notifications off" : cadence == 0 ? "One gentle nudge" : "Every \(cadence) min"
-            Label(alert, systemImage: "bell").font(.footnote.weight(.medium)).foregroundStyle(palette.accent)
+            let alert = cadence == 0 ? "One notification" : "Nag me every \(cadence) min"
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    Label(alert, systemImage: "bell")
+                    Spacer(minLength: 4)
+                    Text("15 min snooze").foregroundStyle(palette.secondary)
+                }
+                VStack(alignment: .leading, spacing: 5) {
+                    Label(alert, systemImage: "bell")
+                    Text("15 min snooze").foregroundStyle(palette.secondary)
+                }
+            }
+            .font(.caption).foregroundStyle(palette.accent)
             if !Calendar.autoupdatingCurrent.isDate(current.date, inSameDayAs: now) {
                 Text(current.date, format: .dateTime.weekday(.wide).month(.abbreviated).day())
                     .font(.footnote).foregroundStyle(palette.secondary)
@@ -445,7 +482,7 @@ private struct NudgeAgenda: View {
             }
         }
         .padding(16)
-        .nudgePanel(palette, fill: palette.coral)
+        .nudgePanel(palette, fill: palette.coral, radius: 24)
         .id(occurrence.id)
         .transition(.opacity)
     }
@@ -491,7 +528,7 @@ private struct NudgeAgenda: View {
                 Text("Adjust the current reminder from Today or Upcoming.")
                     .font(.footnote).foregroundStyle(palette.secondary)
             } else {
-                Text(occurrence.date <= now ? "Later options start from now." : "Each tap updates the scheduled time.")
+                Text(occurrence.date <= now ? "Later options start from now." : "Tap again to keep adjusting.")
                     .font(.footnote).foregroundStyle(palette.secondary)
                 Grid(alignment: .leading, horizontalSpacing: 7, verticalSpacing: 7) {
                     GridRow {
@@ -511,8 +548,8 @@ private struct NudgeAgenda: View {
                 Text(adjustmentIssue).font(.footnote).foregroundStyle(palette.accent)
             }
         }
-        .padding(11)
-        .nudgePanel(palette, fill: palette.canvas)
+        .padding(13)
+        .nudgePanel(palette, fill: palette.canvas, radius: 16)
     }
 
     private func shiftButton(_ shift: ReminderTimeShift, direction: ReminderTimeShift.Direction,
@@ -537,8 +574,8 @@ private struct NudgeAgenda: View {
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .nudgePanel(palette)
+            .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
+            .nudgePanel(palette, radius: 12)
         }
         .buttonStyle(.plain)
         .disabled(candidate == nil)
@@ -587,4 +624,3 @@ private struct NudgeAgenda: View {
         .nudgePanel(palette)
     }
 }
-

@@ -107,6 +107,8 @@ enum ReminderEditorDraft {
     static func reminder(original: Reminder?, title: String, notes: String, day: Date,
                          time: String, isPM: Bool, preferences: ReminderPreferences,
                          now: Date = .now, calendar: Calendar = .autoupdatingCurrent) throws -> Reminder {
+        var preferences = preferences
+        preferences.notifications = true
         let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { throw Problem.emptyTitle }
         guard !time.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw Problem.emptyTime }

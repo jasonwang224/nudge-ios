@@ -7,7 +7,9 @@ struct NudgeSettings: View {
     @Binding var appearance: NudgeAppearance
     let palette: NudgePalette
 
+    @Environment(\.openURL) private var openURL
     @State private var exporting = false
+    @State private var showingBackupHelp = false
     @State private var importing = false
     @State private var document = ReminderBackupDocument()
     @State private var pendingBackup: ReminderBackup?
@@ -21,49 +23,84 @@ struct NudgeSettings: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                NudgeHeading(eyebrow: "Make it yours", title: "Settings",
-                             subtitle: "A good default makes all the difference.",
-                             icon: "slider.horizontal.3", palette: palette)
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Your usual, every time.").font(.headline)
-                    Text("These defaults apply to new reminders. You can adjust them for each reminder.")
-                        .font(.subheadline).foregroundStyle(palette.secondary)
+            VStack(alignment: .leading, spacing: 22) {
+                NudgeHeading(eyebrow: "", title: "Settings", subtitle: "", icon: "", palette: palette)
+                    .padding(.bottom, 2)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("New reminder defaults").font(.subheadline.weight(.semibold)).accessibilityAddTraits(.isHeader)
+                    PreferenceFields(preferences: $store.defaults, palette: palette, isDefaults: true)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(15)
-                .nudgePanel(palette, fill: palette.sage)
-                PreferenceFields(preferences: $store.defaults, palette: palette)
-                VStack(alignment: .leading, spacing: 12) {
-                    Label("APPEARANCE", systemImage: "moon")
-                        .font(.caption.weight(.semibold)).tracking(0.8)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Notifications").font(.subheadline.weight(.semibold)).accessibilityAddTraits(.isHeader)
+                    VStack(spacing: 0) {
+                        Button {
+                            if let url = URL(string: UIApplication.openNotificationSettingsURLString) { openURL(url) }
+                        } label: {
+                            NudgeSettingsRow(title: "iPhone settings", icon: "bell", palette: palette) {
+                                Image(systemName: "chevron.right").font(.caption).foregroundStyle(palette.secondary)
+                            }
+                        }.buttonStyle(.plain)
+                        Divider().overlay(palette.line.opacity(0.5)).padding(.horizontal, 14)
+                        NudgeSettingsRow(title: "Snooze", icon: "clock", palette: palette) {
+                            Text("15 minutes").font(.subheadline).foregroundStyle(palette.secondary)
+                        }
+                    }.nudgePanel(palette)
+                    Text("Reminders always request notifications. Sound and vibration follow your iPhone settings.")
+                        .font(.caption).foregroundStyle(palette.secondary).padding(.horizontal, 3)
+                }
+                NudgeSettingsRow(title: "Appearance", icon: "moon", palette: palette) {
                     Picker("Appearance", selection: $appearance) {
                         ForEach(NudgeAppearance.allCases) { style in Text(style.rawValue).tag(style) }
-                    }.pickerStyle(.segmented)
-                }
-                .padding(15).nudgePanel(palette)
-                VStack(alignment: .leading, spacing: 12) {
-                    Label("BACKUP", systemImage: "externaldrive").font(.caption.weight(.semibold))
-                    Text(store.backupStatus).font(.footnote).foregroundStyle(palette.secondary)
-                    Text("Save your reminders, including completed items, to a JSON file. Import adds missing reminders and keeps your existing ones. Previously deleted reminders are skipped. App defaults and appearance stay unchanged.")
-                        .font(.footnote).foregroundStyle(palette.secondary)
-                    Button("Export reminders") {
-                        do {
-                            document = ReminderBackupDocument(data: try store.exportBackup())
-                            exporting = true
-                        } catch { message = "Could not export your reminders. Check the storage message and try again." }
+                    }.pickerStyle(.menu).labelsHidden().tint(palette.secondary)
+                }.nudgePanel(palette)
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Text("Backup").font(.subheadline.weight(.semibold)).accessibilityAddTraits(.isHeader)
+                        Spacer()
+                        Button { showingBackupHelp = true } label: {
+                            Image(systemName: "info.circle").frame(width: 44, height: 44)
+                        }.buttonStyle(.plain).accessibilityLabel("About backup")
                     }
-                    Button("Import reminders") { importing = true }
-                }.padding(15).nudgePanel(palette)
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(versionLabel)
-                    Text("Developed by Jason Wang")
+                    VStack(alignment: .leading, spacing: 12) {
+                        Label(store.backupStatus, systemImage: "checkmark.shield")
+                            .font(.subheadline).foregroundStyle(palette.green)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Divider().overlay(palette.line)
+                        HStack(spacing: 0) {
+                            Button {
+                                do {
+                                    document = ReminderBackupDocument(data: try store.exportBackup())
+                                    exporting = true
+                                } catch { message = "Could not export your reminders. Check the storage message and try again." }
+                            } label: {
+                                Label("Export", systemImage: "square.and.arrow.up")
+                                    .frame(maxWidth: .infinity, minHeight: 44)
+                            }
+                            Divider().frame(height: 22)
+                            Button { importing = true } label: {
+                                Label("Import", systemImage: "square.and.arrow.down")
+                                    .frame(maxWidth: .infinity, minHeight: 44)
+                            }
+                        }
+                        .font(.subheadline).buttonStyle(.plain).foregroundStyle(palette.green)
+                    }
+                    .padding(14).nudgePanel(palette, fill: palette.sage)
                 }
-                .font(.footnote)
+                VStack(spacing: 7) {
+                    Text(versionLabel).font(.caption)
+                    Text("Developed by Jason Wang").font(.footnote)
+                }
                 .foregroundStyle(palette.secondary)
+                .frame(maxWidth: .infinity)
+                .padding(.bottom, 8)
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 16)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 20)
+        }
+        .alert("About backup", isPresented: $showingBackupHelp) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("The app keeps a verified recovery copy on this iPhone and can restore it if the main database is damaged. Export a separate file to protect against deleting the app or losing your phone.\n\nExport includes completed reminders. Import adds missing reminders; existing and previously deleted reminders are skipped. App defaults and appearance stay unchanged.")
         }
         .fileExporter(isPresented: $exporting, document: document, contentType: .json,
                       defaultFilename: "Reminders-backup") { result in

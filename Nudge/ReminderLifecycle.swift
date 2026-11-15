@@ -195,6 +195,16 @@ enum ReminderLifecycle {
         return current == expected
     }
 
+    /// The app no longer offers an alerts-off mode. Preserve identity, dates,
+    /// repeat history and cancellation evidence when upgrading older records.
+    static func enablingNotifications(in snapshot: ReminderSnapshot) -> ReminderSnapshot {
+        var changed = snapshot
+        for index in changed.reminders.indices where changed.reminders[index].completedAt == nil {
+            changed.reminders[index].preferences.notifications = true
+        }
+        return changed
+    }
+
     static func refreshingSchedules(in snapshot: ReminderSnapshot,
                                     calendar: Calendar = .autoupdatingCurrent) -> ReminderSnapshot {
         var changed = snapshot

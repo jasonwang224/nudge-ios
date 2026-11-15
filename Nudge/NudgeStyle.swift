@@ -20,15 +20,15 @@ enum NudgeAppearance: String, CaseIterable, Identifiable {
 struct NudgePalette {
     var scheme: ColorScheme
 
-    var paper: Color { color(0xfcfbf8, 0x292d27) }
-    var canvas: Color { color(0xf4f3ee, 0x20231f) }
+    var paper: Color { color(0xfaf9f6, 0x292d27) }
+    var canvas: Color { color(0xf0f1eb, 0x20231f) }
     var surface: Color { color(0xffffff, 0x33382f) }
-    var ink: Color { color(0x30322d, 0xf4f2e9) }
+    var ink: Color { color(0x292e29, 0xf4f2e9) }
     var secondary: Color { color(0x666a60, 0xb2b9a9) }
     var line: Color { color(0xe8e8df, 0x41473b) }
-    var accent: Color { color(0xb7442e, 0xf39479) }
-    var coral: Color { color(0xfae5dc, 0x5c3f34) }
-    var sage: Color { color(0xe7eee2, 0x3e4938) }
+    var accent: Color { color(0xb74730, 0xf39479) }
+    var coral: Color { color(0xf8e5dc, 0x5c3f34) }
+    var sage: Color { color(0xe9eee5, 0x3e4938) }
     var green: Color { color(0x4e674b, 0xc2d9af) }
 
     private func color(_ light: UInt32, _ dark: UInt32) -> Color {
@@ -40,14 +40,8 @@ struct NudgePalette {
 }
 
 extension View {
-    func nudgePanel(_ palette: NudgePalette, fill: Color? = nil) -> some View {
-        self
-            .background(fill ?? palette.surface, in: RoundedRectangle(cornerRadius: 20))
-            .overlay {
-                RoundedRectangle(cornerRadius: 20)
-                    .strokeBorder(palette.line, lineWidth: 1)
-                    .allowsHitTesting(false)
-            }
+    func nudgePanel(_ palette: NudgePalette, fill: Color? = nil, radius: CGFloat = 20) -> some View {
+        background(fill ?? palette.surface, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
     }
 }
 
@@ -59,25 +53,50 @@ struct NudgeHeading: View {
     let palette: NudgePalette
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            VStack(alignment: .leading, spacing: 7) {
-                Text(eyebrow.uppercased())
-                    .font(.caption.weight(.semibold)).tracking(1.3)
-                    .foregroundStyle(palette.secondary)
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 5) {
+                if !eyebrow.isEmpty {
+                    Text(eyebrow).font(.caption).foregroundStyle(palette.secondary)
+                }
                 Text(title)
-                    .font(.largeTitle.weight(.semibold))
+                    .font(.largeTitle.weight(.bold))
+                    .tracking(-0.8)
                     .foregroundStyle(palette.ink)
                     .accessibilityAddTraits(.isHeader)
-                Text(subtitle).font(.subheadline).foregroundStyle(palette.secondary)
+                if !subtitle.isEmpty {
+                    Text(subtitle).font(.subheadline).foregroundStyle(palette.secondary)
+                }
             }
             Spacer(minLength: 0)
-            Image(systemName: icon)
-                .font(.system(size: 25, weight: .light))
-                .foregroundStyle(palette.accent)
-                .padding(12)
-                .background(palette.coral, in: RoundedRectangle(cornerRadius: 17))
-                .accessibilityHidden(true)
+            if !icon.isEmpty {
+                Image(systemName: icon)
+                    .font(.system(size: 25, weight: .light))
+                    .foregroundStyle(palette.accent)
+                    .frame(width: 46, height: 46)
+                    .background(palette.coral, in: RoundedRectangle(cornerRadius: 16))
+                    .accessibilityHidden(true)
+            }
         }
+    }
+}
+
+struct NudgeSettingsRow<Trailing: View>: View {
+    let title: String
+    let icon: String
+    let palette: NudgePalette
+    @ViewBuilder var trailing: () -> Trailing
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon).font(.subheadline).foregroundStyle(palette.secondary)
+                .frame(width: 22).accessibilityHidden(true)
+            Text(title).font(.subheadline)
+            Spacer(minLength: 6)
+            trailing()
+        }
+        .foregroundStyle(palette.ink)
+        .padding(.horizontal, 14).padding(.vertical, 4)
+        .frame(minHeight: 50)
     }
 }
 
@@ -98,120 +117,91 @@ final class NudgeSoundPreview {
 struct PreferenceFields: View {
     @Binding var preferences: ReminderPreferences
     let palette: NudgePalette
+    var isDefaults = false
     @State private var soundPreview = NudgeSoundPreview()
-    private let columns = [GridItem(.adaptive(minimum: 65), spacing: 7)]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Label("NAG ME", systemImage: "bell.badge")
-                .font(.caption.weight(.semibold)).tracking(0.8)
-                .foregroundStyle(palette.secondary)
-            LazyVGrid(columns: columns, spacing: 7) {
-                ForEach(ReminderPreferences.nagIntervals, id: \.self) { minutes in
-                    chip(minutes == 0 ? "Off" : "\(minutes) min", selected: preferences.nagMinutes == minutes) {
-                        preferences.nagMinutes = minutes
-                    }
-                }
-            }
-            Text(nagHelp).font(.footnote).foregroundStyle(palette.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 9) {
             VStack(spacing: 0) {
-                row("Repeat", icon: "repeat", color: palette.sage) {
+                if isDefaults {
+                    nagRow
+                    ruleDivider
+                }
+                NudgeSettingsRow(title: "Repeat", icon: "repeat", palette: palette) {
                     Picker("Repeat", selection: $preferences.repeatRule) {
                         ForEach(RepeatRule.allCases) { rule in Text(rule.rawValue).tag(rule) }
-                    }.pickerStyle(.menu).labelsHidden()
-                }
-                if preferences.repeatRule == .custom {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 37), spacing: 5)], spacing: 5) {
-                        ForEach(1...7, id: \.self) { day in
-                            let calendar = Calendar.autoupdatingCurrent
-                            chip(calendar.veryShortWeekdaySymbols[day - 1], selected: preferences.weekdays.contains(day)) {
-                                if preferences.weekdays.contains(day) {
-                                    if preferences.weekdays.count > 1 { preferences.weekdays.remove(day) }
-                                }
-                                else { preferences.weekdays.insert(day) }
-                            }
-                            .accessibilityLabel(calendar.weekdaySymbols[day - 1])
-                        }
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 10)
-                    Text(preferences.weekdays.isEmpty ? "Choose at least one repeat day." : "Keep at least one repeat day selected.")
-                        .font(.footnote)
-                        .foregroundStyle(preferences.weekdays.isEmpty ? palette.accent : palette.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 12)
-                        .padding(.bottom, 10)
+                    .pickerStyle(.menu).labelsHidden().tint(palette.secondary)
                 }
-                Divider().overlay(palette.line)
-                row("Notifications", icon: "bell", color: palette.coral) {
-                    Toggle("Notifications", isOn: $preferences.notifications)
-                        .labelsHidden().tint(palette.green)
+                if preferences.repeatRule == .custom { customDays }
+                ruleDivider
+                if !isDefaults {
+                    nagRow
+                    ruleDivider
                 }
-                Divider().overlay(palette.line)
-                row("Vibration", icon: "iphone.radiowaves.left.and.right", color: palette.sage) {
-                    Text("iPhone settings").font(.footnote).foregroundStyle(palette.secondary)
-                }
-                Divider().overlay(palette.line)
-                row("Sound", icon: "speaker.wave.2", color: palette.coral) {
+                NudgeSettingsRow(title: "Sound", icon: "speaker.wave.2", palette: palette) {
                     Picker("Sound", selection: $preferences.sound) {
                         ForEach(AlertSound.allCases) { sound in Text(sound.rawValue).tag(sound) }
-                    }.pickerStyle(.menu).labelsHidden()
+                    }
+                    .pickerStyle(.menu).labelsHidden().tint(palette.secondary)
                     Button { soundPreview.play(preferences.sound) } label: {
-                        Image(systemName: "play.circle").font(.title3)
-                            .frame(minWidth: 36, minHeight: 44)
+                        Image(systemName: "play.circle")
+                            .font(.title3).frame(width: 44, height: 44)
                     }
                     .buttonStyle(.plain).foregroundStyle(palette.accent)
                     .accessibilityLabel("Preview sound")
                     .disabled(preferences.sound.fileName == nil)
                 }
-                Divider().overlay(palette.line)
-                row("Snooze", icon: "clock", color: palette.sage) {
-                    Text("15 minutes").font(.footnote).foregroundStyle(palette.secondary)
-                }
             }
             .nudgePanel(palette)
+            Text(isDefaults ? "Applied to reminders you create next." : "Snooze pauses nags for 15 minutes.")
+                .font(.caption).foregroundStyle(palette.secondary)
+                .padding(.horizontal, 3)
         }
         .onChange(of: preferences.sound) { _, sound in soundPreview.play(sound) }
     }
 
-    private var nagHelp: String {
-        if !preferences.notifications { return "Turn on notifications to receive nudges." }
-        if preferences.nagMinutes == 0 { return "One notification, with no follow-up nudges." }
-        if preferences.nagMinutes == 1 { return "Tests a single repeating Lock Screen alert. Snooze pauses it for 15 minutes." }
-        return "Repeat every \(preferences.nagMinutes) minutes. Snooze pauses nudges for 15 minutes."
+    private var ruleDivider: some View {
+        Divider().overlay(palette.line.opacity(0.5)).padding(.horizontal, 14)
     }
 
-    private func chip(_ label: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(label)
-                .font(.subheadline.weight(selected ? .semibold : .regular))
-                .foregroundStyle(selected ? palette.accent : palette.ink)
-                .frame(maxWidth: .infinity, minHeight: 44)
-                .background(selected ? palette.coral : palette.surface, in: RoundedRectangle(cornerRadius: 11))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 11)
-                        .strokeBorder(selected ? palette.accent : palette.line, lineWidth: 1)
+    private var nagRow: some View {
+        NudgeSettingsRow(title: "Nag me", icon: "bell", palette: palette) {
+            Picker("Nag me", selection: $preferences.nagMinutes) {
+                ForEach(ReminderPreferences.nagIntervals, id: \.self) { minutes in
+                    Text(minutes == 0 ? "Off" : "Every \(minutes) min").tag(minutes)
                 }
+            }
+            .pickerStyle(.menu).labelsHidden().tint(palette.secondary)
         }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
-    private func row<Trailing: View>(_ label: String, icon: String, color: Color,
-                                     @ViewBuilder trailing: () -> Trailing) -> some View {
-        HStack(spacing: 9) {
-            Image(systemName: icon)
-                .font(.subheadline)
-                .frame(width: 28, height: 28)
-                .background(color, in: RoundedRectangle(cornerRadius: 8))
-                .accessibilityHidden(true)
-            Text(label).font(.subheadline)
-            Spacer(minLength: 0)
-            trailing()
+    private var customDays: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 38), spacing: 4)], spacing: 5) {
+                ForEach(1...7, id: \.self) { day in
+                    let calendar = Calendar.autoupdatingCurrent
+                    let selected = preferences.weekdays.contains(day)
+                    Button {
+                        if selected {
+                            if preferences.weekdays.count > 1 { preferences.weekdays.remove(day) }
+                        } else { preferences.weekdays.insert(day) }
+                    } label: {
+                        Text(calendar.shortWeekdaySymbols[day - 1])
+                            .font(.caption.weight(selected ? .semibold : .regular))
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .foregroundStyle(selected ? palette.accent : palette.secondary)
+                            .background(selected ? palette.coral : palette.canvas,
+                                        in: RoundedRectangle(cornerRadius: 10))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(calendar.weekdaySymbols[day - 1])
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+                }
+            }
+            Text(preferences.weekdays.isEmpty ? "Choose at least one repeat day." : "Keep at least one repeat day selected.")
+                .font(.caption).foregroundStyle(preferences.weekdays.isEmpty ? palette.accent : palette.secondary)
         }
-        .foregroundStyle(palette.ink)
-        .padding(.horizontal, 12)
-        .frame(minHeight: 52)
+        .padding(.horizontal, 14).padding(.bottom, 12)
     }
 }

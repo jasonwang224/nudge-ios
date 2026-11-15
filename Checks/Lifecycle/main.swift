@@ -311,3 +311,30 @@ if case let .file(afterRestart) = reloadedFailure {
 } else { preconditionFailure("Expected reloaded completion after a failed edit.") }
 
 print("Lifecycle integration checks passed: edit, Snooze, Done, repeat history, restore, delete, stale actions, card preservation, and persistence.")
+
+
+// Removing the alerts switch must not lose/remap records or change their times.
+var alertsOffSnapshot = original
+for index in alertsOffSnapshot.reminders.indices {
+    alertsOffSnapshot.reminders[index].preferences.notifications = false
+}
+var legacyHistory = alertsOffSnapshot.reminders[0]
+legacyHistory.id = UUID()
+legacyHistory.completedAt = now
+alertsOffSnapshot.reminders.append(legacyHistory)
+alertsOffSnapshot.deletedIDs.insert(UUID())
+let enabledSnapshot = ReminderLifecycle.enablingNotifications(in: alertsOffSnapshot)
+precondition(enabledSnapshot.reminders.count == alertsOffSnapshot.reminders.count)
+precondition(enabledSnapshot.deletedIDs == alertsOffSnapshot.deletedIDs)
+precondition(enabledSnapshot.stoppedNotificationGenerations == alertsOffSnapshot.stoppedNotificationGenerations)
+for (before, after) in zip(alertsOffSnapshot.reminders, enabledSnapshot.reminders) {
+    if before.completedAt != nil { precondition(before == after) }
+    else {
+        var expected = before
+        expected.preferences.notifications = true
+        precondition(after == expected, "Enabling alerts must preserve every other reminder field.")
+    }
+}
+precondition(ReminderLifecycle.enablingNotifications(in: enabledSnapshot) == enabledSnapshot)
+_ = try enabledSnapshot.validated()
+print("Always-on notification upgrade preserves reminder identities, schedules, history and deletion evidence.")

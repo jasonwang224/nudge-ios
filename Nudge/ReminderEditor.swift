@@ -15,6 +15,8 @@ struct ReminderEditor: View {
     @State private var preferences: ReminderPreferences
     @State private var error: String?
     @State private var didSave = false
+    @State private var pickingDate = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @FocusState private var timeFocused: Bool
 
     init(store: ReminderStore, reminder: Reminder?, initialDay: Date? = nil) {
@@ -35,46 +37,51 @@ struct ReminderEditor: View {
         _time = State(initialValue: reminder == nil
                       ? "" : String(format: "%d:%02d", hour % 12 == 0 ? 12 : hour % 12, minute))
         _isPM = State(initialValue: hour >= 12)
-        _preferences = State(initialValue: reminder?.preferences ?? store.defaults)
+        var initialPreferences = reminder?.preferences ?? store.defaults
+        initialPreferences.notifications = true
+        _preferences = State(initialValue: initialPreferences)
     }
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        TextField("What’s on your mind?", text: $title)
-                            .font(.title2.weight(.semibold))
+                VStack(alignment: .leading, spacing: 26) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("What would you like to remember?")
+                            .font(.caption).foregroundStyle(palette.secondary)
+                        TextField("Reminder name", text: $title, axis: .vertical)
+                            .font(.title2.weight(.medium)).lineLimit(1...3)
                             .accessibilityLabel("Reminder title")
                         Divider().overlay(palette.line)
-                        TextField("A little note, if you like", text: $notes, axis: .vertical)
-                            .font(.subheadline)
-                            .lineLimit(1...4)
-                            .accessibilityLabel("Reminder note")
                     }
-                    .padding(16)
-                    .nudgePanel(palette)
                     scheduleCard
                     PreferenceFields(preferences: $preferences, palette: palette)
+                    VStack(spacing: 12) {
+                        TextField("Add a note (optional)", text: $notes, axis: .vertical)
+                            .font(.subheadline).lineLimit(1...4)
+                            .accessibilityLabel("Reminder note")
+                        Divider().overlay(palette.line)
+                    }
                     if let error {
                         Label(error, systemImage: "exclamationmark.circle")
                             .font(.subheadline).foregroundStyle(palette.accent)
                             .accessibilityIdentifier("reminder-error")
                     }
-                    Button(action: save) {
-                        Label(original == nil ? "Create reminder" : "Save changes", systemImage: "checkmark")
-                            .font(.headline).frame(maxWidth: .infinity, minHeight: 48)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .buttonBorderShape(.roundedRectangle(radius: 15))
-                    .disabled(didSave)
-                    if original == nil {
-                        Label("Starting with your saved defaults.", systemImage: "slider.horizontal.3")
-                            .font(.footnote).foregroundStyle(palette.secondary)
-                            .frame(maxWidth: .infinity)
-                    }
                 }
-                .padding(18)
+                .padding(20)
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                Button(action: save) {
+                    Text(original == nil ? "Save reminder" : "Save changes")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity, minHeight: 50)
+                        .foregroundStyle(canSave ? (palette.scheme == .dark ? palette.canvas : .white) : palette.secondary)
+                        .background(canSave ? palette.accent : palette.canvas,
+                                    in: RoundedRectangle(cornerRadius: 17))
+                }
+                .buttonStyle(.plain).disabled(!canSave)
+                .padding(.horizontal, 20).padding(.vertical, 12)
+                .background(palette.paper)
             }
             .scrollDismissesKeyboard(.interactively)
             .background(palette.paper.ignoresSafeArea())
@@ -85,9 +92,6 @@ struct ReminderEditor: View {
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save", action: save).fontWeight(.semibold).disabled(didSave)
-                }
                 ToolbarItemGroup(placement: .keyboard) {
                     if timeFocused {
                         Spacer()
@@ -98,15 +102,38 @@ struct ReminderEditor: View {
                     }
                 }
             }
+            .sheet(isPresented: $pickingDate) {
+                NavigationStack {
+                    DatePicker("Reminder date", selection: $day, displayedComponents: .date)
+                        .datePickerStyle(.graphical).padding()
+                        .background(palette.paper)
+                        .navigationTitle("Choose date").navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("Done") { pickingDate = false }
+                            }
+                        }
+                }
+                .presentationDetents([.medium, .large])
+                .tint(palette.accent)
+            }
         }
+    }
+
+    private var canSave: Bool {
+        !didSave && !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && ReminderEditorDraft.formattedTime(time) != nil
+            && (preferences.repeatRule != .custom || !preferences.weekdays.isEmpty)
     }
 
     private var scheduleCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("WHEN", systemImage: "clock").font(.caption.weight(.semibold)).tracking(1)
-                .foregroundStyle(palette.secondary)
-            HStack(spacing: 12) {
-                TextField("Time", text: $time)
+            Text("Time").font(.subheadline.weight(.semibold))
+            let layout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+                : AnyLayout(HStackLayout(spacing: 12))
+            layout {
+                TextField("– – : – –", text: $time)
                     .keyboardType(.numberPad)
                     .focused($timeFocused)
                     .font(.largeTitle.weight(.medium).monospacedDigit())
@@ -115,16 +142,27 @@ struct ReminderEditor: View {
                     Text("AM").tag(false)
                     Text("PM").tag(true)
                 }
-                .pickerStyle(.segmented)
-                .frame(width: 116)
+                .pickerStyle(.segmented).frame(width: 116)
             }
-            Text("Enter 830 for 8:30.")
-                .font(.footnote)
-                .foregroundStyle(palette.secondary)
-            DatePicker("Date", selection: $day, displayedComponents: .date)
-                .font(.subheadline)
+            Text("Enter a time, like 300 for 3:00.")
+                .font(.caption).foregroundStyle(palette.secondary)
+            HStack {
+                Text("Date").font(.subheadline.weight(.semibold))
+                Spacer()
+                Button { timeFocused = false; pickingDate = true } label: {
+                    Label(day.formatted(.dateTime.month(.abbreviated).day()), systemImage: "calendar")
+                        .font(.subheadline)
+                        .frame(minHeight: 44)
+                }
+                .buttonStyle(.plain).foregroundStyle(palette.accent)
+                .accessibilityLabel("Choose date, " + day.formatted(date: .complete, time: .omitted))
+            }
+            .padding(.top, 8)
             TimelineView(.periodic(from: .now, by: 15)) { context in
-                HStack(spacing: 6) {
+                let layout = dynamicTypeSize.isAccessibilitySize
+                    ? AnyLayout(VStackLayout(spacing: 6))
+                    : AnyLayout(HStackLayout(spacing: 6))
+                layout {
                     dateShortcut(0, now: context.date)
                     dateShortcut(1, now: context.date)
                     dateShortcut(3, now: context.date)
@@ -133,12 +171,11 @@ struct ReminderEditor: View {
             if let schedule = parsedSchedule, let date = schedule.dueDate() {
                 let local = Calendar.autoupdatingCurrent.dateComponents([.hour, .minute], from: date)
                 VStack(alignment: .leading, spacing: 4) {
-                    Label(date.formatted(date: .abbreviated, time: .shortened), systemImage: "calendar")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(palette.accent)
-                    Text(scheduleSummary).font(.footnote).foregroundStyle(palette.secondary)
+                    Text(date.formatted(date: .abbreviated, time: .shortened))
+                        .font(.caption.weight(.medium)).foregroundStyle(palette.accent)
+                    Text(scheduleSummary).font(.caption).foregroundStyle(palette.secondary)
                     if local.hour != schedule.hour || local.minute != schedule.minute {
-                        Text("The clock skips that time on this date. Nudge will use the next available time.")
+                        Text("The clock skips that time on this date. The app will use the next available time.")
                             .font(.footnote).foregroundStyle(palette.secondary)
                     }
                     if schedule.prefersSecondOccurrence == true {
@@ -147,12 +184,9 @@ struct ReminderEditor: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(12)
-                .background(palette.canvas, in: RoundedRectangle(cornerRadius: 12))
+                .padding(.top, 4)
             }
         }
-        .padding(16)
-        .nudgePanel(palette)
     }
 
     private var scheduleSummary: String {
@@ -169,16 +203,24 @@ struct ReminderEditor: View {
         let calendar = Calendar.autoupdatingCurrent
         if let date = ReminderEditorDraft.shortcutDate(days: days, now: now, calendar: calendar) {
             let name = days == 0 ? "Today" : days == 1 ? "Tomorrow" : date.formatted(.dateTime.weekday(.wide))
-            Button(name) {
-                // A tap at midnight must use the current day even if the next
-                // label refresh has not happened. Never move the draft by itself.
+            let selected = calendar.isDate(day, inSameDayAs: date)
+            Button {
+                // Resolve from the phone clock at tap time, including midnight.
                 if let currentDate = ReminderEditorDraft.shortcutDate(days: days, now: .now) {
                     day = currentDate
                 }
+            } label: {
+                VStack(spacing: 5) {
+                    Text(name).font(.caption.weight(.medium))
+                    Text(date, format: .dateTime.month(.abbreviated).day()).font(.caption2)
+                }
+                .foregroundStyle(selected ? palette.paper : palette.ink)
+                .frame(maxWidth: .infinity, minHeight: 56)
+                .padding(.horizontal, 3)
+                .background(selected ? palette.ink : palette.canvas, in: RoundedRectangle(cornerRadius: 13))
             }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .tint(calendar.isDate(day, inSameDayAs: date) ? palette.accent : palette.secondary)
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(selected ? .isSelected : [])
         }
     }
 
