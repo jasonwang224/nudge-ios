@@ -179,12 +179,15 @@ try withDatabase { db in
     precondition(repairedBackup == .file(original))
     let retained = try Data(contentsOf: db.url)
     precondition(retained == primary)
-    // A payload byte edit is also rejected; a valid primary rebuilds the damaged copy.
+    // A damaged payload may be newer than the primary: preserve both rather than guess.
     record = try JSONSerialization.jsonObject(with: Data(contentsOf: db.recoveryURL)) as! [String: Any]
     record["payload"] = Data("tampered".utf8).base64EncodedString()
     try JSONSerialization.data(withJSONObject: record).write(to: db.recoveryURL, options: .atomic)
-    let repairedAgain = try db.read()
-    precondition(repairedAgain == .file(original))
+    let damagedBackup = try Data(contentsOf: db.recoveryURL)
+    fail("unknown damaged recovery payload") { _ = try db.read() }
+    let keptPrimary = try Data(contentsOf: db.url)
+    let keptRecovery = try Data(contentsOf: db.recoveryURL)
+    precondition(keptPrimary == primary && keptRecovery == damagedBackup)
 }
 
 try withDatabase { db in
@@ -236,21 +239,22 @@ try withDatabase { db in
     precondition(upgraded == readable && FileManager.default.fileExists(atPath: db.recoveryURL.path))
 }
 
-for futureEnum in [false, true] {
+for futureFormat in ["version", "enum", "numeric"] {
     try withDatabase { db in
         _ = try db.commit(original, replacing: .missing)
         let backup = try Data(contentsOf: db.recoveryURL)
         var json = try JSONSerialization.jsonObject(with: Data(contentsOf: db.url)) as! [String: Any]
-        if futureEnum {
+        if futureFormat != "version" {
             var records = json["reminders"] as! [[String: Any]]
             var preferences = records[0]["preferences"] as! [String: Any]
-            preferences["repeatRule"] = "Future repeat rule"
+            if futureFormat == "enum" { preferences["repeatRule"] = "Future repeat rule" }
+            else { preferences["nagMinutes"] = 7 }
             records[0]["preferences"] = preferences
             json["reminders"] = records
         } else { json["version"] = 99 }
         let future = try JSONSerialization.data(withJSONObject: json)
         try future.write(to: db.url, options: .atomic)
-        fail("future primary schema/enum") { _ = try db.read() }
+        fail("future primary schema/enum/numeric value") { _ = try db.read() }
         let kept = try Data(contentsOf: db.url)
         let keptBackup = try Data(contentsOf: db.recoveryURL)
         precondition(kept == future && keptBackup == backup)
@@ -268,4 +272,38 @@ try withDatabase { db in
     let keptBackup = try Data(contentsOf: db.recoveryURL)
     precondition(kept == primary && keptBackup == future)
 }
+
+try withDatabase { db in
+    let empty = ReminderSnapshot()
+    let source = try db.commit(empty, replacing: .missing)
+    let oldEmptyPrimary = try Data(contentsOf: db.url)
+    var interrupted = db
+    interrupted.writeFile = { data, url, options in
+        if url == db.url { throw Injected.write }
+        try data.write(to: url, options: options)
+    }
+    _ = try interrupted.commit(original, replacing: source)
+    var record = try JSONSerialization.jsonObject(with: Data(contentsOf: db.recoveryURL)) as! [String: Any]
+    record["integrity"] = "damaged integrity metadata"
+    let latestDamagedCopy = try JSONSerialization.data(withJSONObject: record)
+    try latestDamagedCopy.write(to: db.recoveryURL, options: .atomic)
+    fail("never replace newer recovery payload with old empty primary") { _ = try db.read() }
+    let keptRecovery = try Data(contentsOf: db.recoveryURL)
+    let keptPrimary = try Data(contentsOf: db.url)
+    precondition(keptRecovery == latestDamagedCopy && keptPrimary == oldEmptyPrimary)
+}
+
+try withDatabase { db in
+    _ = try db.commit(original, replacing: .missing)
+    let backup = try Data(contentsOf: db.recoveryURL)
+    var divergent = original
+    divergent.reminders[0].title = "Unexplained external change"
+    let divergentBytes = try JSONEncoder().encode(divergent)
+    try divergentBytes.write(to: db.url, options: .atomic)
+    fail("valid-looking divergent primary must not replace backup") { _ = try db.read() }
+    let retainedPrimary = try Data(contentsOf: db.url)
+    let retainedBackup = try Data(contentsOf: db.recoveryURL)
+    precondition(retainedPrimary == divergentBytes && retainedBackup == backup)
+}
+
 print("Automatic recovery checks passed: upgrade, corruption/missing file, full metadata, interrupted/repeated mirror writes, backup failures, exact readback, quarantine failures, divergent truncation, checksums, both-copy failures and future formats.")

@@ -74,6 +74,8 @@ expectFailure("cannot recreate missing migrated primary") {
 }
 precondition(!FileManager.default.fileExists(atPath: database.url.path))
 
+// Set up a separate explicit legacy-file fixture after testing both-copy failure.
+try FileManager.default.removeItem(at: database.recoveryURL)
 // Legacy custom repeats stay readable and portable, even in a mixed backup.
 var legacyCustom = item("Legacy custom")
 legacyCustom.preferences.repeatRule = .custom

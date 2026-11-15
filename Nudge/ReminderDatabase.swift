@@ -53,6 +53,7 @@ struct ReminderDatabase {
     var damagedURL: URL { url.appendingPathExtension("damaged") }
 
     private struct Header: Decodable { let version: Int }
+    private struct RecoveryPayload: Decodable { let payload: Data }
     private struct RecoveryRecord: Codable, Equatable {
         let version: Int
         let payload: Data
@@ -73,7 +74,13 @@ struct ReminderDatabase {
         do {
             let header = try JSONDecoder().decode(Header.self, from: bytes)
             guard header.version == 1 else { throw Problem.unsupported }
-            return try JSONDecoder().decode(ReminderSnapshot.self, from: bytes).validated()
+            let snapshot = try JSONDecoder().decode(ReminderSnapshot.self, from: bytes)
+            do { return try snapshot.validated() }
+            catch {
+                // Future numeric values (for example a new nag interval) may
+                // decode successfully while failing this older app's rules.
+                throw Problem.unsupported
+            }
         } catch let error as DecodingError {
             // Valid JSON with an unknown enum/required field can belong to a
             // newer app even if its schema number is unchanged. Never roll it back.
@@ -120,10 +127,12 @@ struct ReminderDatabase {
         guard let checked = try readRecovery(), checked == record else { throw Problem.invalid }
     }
 
-    private func preserveDamaged(_ bytes: Data) throws {
-        let first = try readBytes(damagedURL)
-        let destination = first == nil || first == bytes ? damagedURL
-            : url.appendingPathExtension("damaged-\(Self.checksum(bytes))")
+    private func preserveDamaged(_ bytes: Data, at original: URL? = nil) throws {
+        let base = original ?? url
+        let firstURL = base.appendingPathExtension("damaged")
+        let first = try readBytes(firstURL)
+        let destination = first == nil || first == bytes ? firstURL
+            : base.appendingPathExtension("damaged-\(Self.checksum(bytes))")
         if try readBytes(destination) != bytes { try atomicWrite(bytes, to: destination) }
         guard try readBytes(destination) == bytes else { throw Problem.invalid }
     }
@@ -156,14 +165,17 @@ struct ReminderDatabase {
             // Permission/protected-data/IO failures do not prove corruption. The
             // backup may hold a newer committed save than the readable primary.
             guard error is DecodingError || (error as? Problem) == .invalid else { throw error }
-            // A bad backup may be replaced only from a fully valid primary.
-            guard let primary, let snapshot = try? decodeSnapshot(primary) else { throw error }
-            do {
-                try writeRecovery(primary, replacing: primary)
-                report("Automatic backup is ready.")
-            } catch {
-                report("Your reminders are readable, but the automatic backup could not be refreshed.")
-            }
+            // The recovery payload may be newer than the primary after an
+            // interrupted mirror. Never overwrite it merely because metadata is
+            // damaged. Repair metadata only when the payload is byte-identical
+            // to the valid primary; otherwise preserve both and fail closed.
+            guard let primary, let snapshot = try? decodeSnapshot(primary),
+                  let damagedRecovery = try readBytes(recoveryURL),
+                  let candidate = try? JSONDecoder().decode(RecoveryPayload.self, from: damagedRecovery),
+                  candidate.payload == primary else { throw error }
+            try preserveDamaged(damagedRecovery, at: recoveryURL)
+            try writeRecovery(primary, replacing: primary)
+            report("Automatic backup is ready.")
             preferences.set(true, forKey: Self.migratedKey)
             return .file(snapshot)
         }
@@ -185,10 +197,12 @@ struct ReminderDatabase {
             }
             if let recovery, recovery.checksum != digest {
                 try validateTransition(from: decodeSnapshot(recovery.payload), to: snapshot)
+                // A well-formed mismatch could be an external/newer write or
+                // valid-looking corruption. Keep both copies rather than guess.
+                throw Problem.changed
             }
             if recovery?.checksum != digest {
-                // Upgrade, lost/broken backup, or a valid write by an older app:
-                // preserve the valid primary rather than roll it back.
+                // First upgrade or genuinely absent backup: seed from the valid primary.
                 do {
                     try writeRecovery(primary, replacing: primary)
                     report("Automatic backup is ready.")
