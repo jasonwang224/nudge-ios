@@ -79,7 +79,10 @@ final class ReminderStore: ObservableObject {
             let merged = try backup.merging(into: snapshot)
             let added = merged.reminders.count - snapshot.reminders.count
             guard added > 0 else { return "No new reminders to import. Existing and previously deleted reminders were skipped." }
-            if let error = commit(merged) { return error }
+            // Import may be the first action on a fresh installation. Request
+            // access before reconciling its active reminders.
+            let hasActiveAlerts = merged.reminders.contains { $0.completedAt == nil }
+            if let error = commit(merged, askPermission: hasActiveAlerts) { return error }
             return "Imported \(added) reminders. Skipped \(backup.reminders.count - added) existing or previously deleted reminders."
         } catch {
             return "This backup could not be imported. Your reminders were kept."

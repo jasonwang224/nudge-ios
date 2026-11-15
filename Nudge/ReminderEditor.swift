@@ -18,6 +18,7 @@ struct ReminderEditor: View {
     @State private var pickingDate = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @FocusState private var timeFocused: Bool
+    @ScaledMetric(relativeTo: .title2) private var titleSize = 25.0
 
     init(store: ReminderStore, reminder: Reminder?, initialDay: Date? = nil) {
         self.store = store
@@ -50,17 +51,24 @@ struct ReminderEditor: View {
                         Text("What would you like to remember?")
                             .font(.caption).foregroundStyle(palette.secondary)
                         TextField("Reminder name", text: $title, axis: .vertical)
-                            .font(.title2.weight(.medium)).lineLimit(1...3)
+                            .font(.system(size: titleSize, weight: .medium)).lineLimit(1...3)
                             .accessibilityLabel("Reminder title")
                         Divider().overlay(palette.line)
                     }
                     scheduleCard
-                    PreferenceFields(preferences: $preferences, palette: palette)
-                    VStack(spacing: 12) {
-                        TextField("Add a note (optional)", text: $notes, axis: .vertical)
-                            .font(.subheadline).lineLimit(1...4)
-                            .accessibilityLabel("Reminder note")
+                    PreferenceFields(preferences: $preferences, palette: palette, showsHelp: false)
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(alignment: .top) {
+                            TextField("Add a note", text: $notes, axis: .vertical)
+                                .font(.footnote).lineLimit(1...4)
+                                .accessibilityLabel("Reminder note")
+                            if notes.isEmpty {
+                                Text("Optional").font(.caption2).foregroundStyle(palette.secondary)
+                            }
+                        }
                         Divider().overlay(palette.line)
+                        Text("Snooze pauses nags for 15 minutes.")
+                            .font(.caption2).foregroundStyle(palette.secondary)
                     }
                     if let error {
                         Label(error, systemImage: "exclamationmark.circle")
@@ -128,7 +136,7 @@ struct ReminderEditor: View {
 
     private var scheduleCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Time").font(.subheadline.weight(.semibold))
+            Text("Time").font(.footnote.weight(.semibold))
             let layout = dynamicTypeSize.isAccessibilitySize
                 ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
                 : AnyLayout(HStackLayout(spacing: 12))
@@ -146,18 +154,7 @@ struct ReminderEditor: View {
             }
             Text("Enter a time, like 300 for 3:00.")
                 .font(.caption).foregroundStyle(palette.secondary)
-            HStack {
-                Text("Date").font(.subheadline.weight(.semibold))
-                Spacer()
-                Button { timeFocused = false; pickingDate = true } label: {
-                    Label(day.formatted(.dateTime.month(.abbreviated).day()), systemImage: "calendar")
-                        .font(.subheadline)
-                        .frame(minHeight: 44)
-                }
-                .buttonStyle(.plain).foregroundStyle(palette.accent)
-                .accessibilityLabel("Choose date, " + day.formatted(date: .complete, time: .omitted))
-            }
-            .padding(.top, 8)
+            Text("Date").font(.footnote.weight(.semibold)).padding(.top, 8)
             TimelineView(.periodic(from: .now, by: 15)) { context in
                 let layout = dynamicTypeSize.isAccessibilitySize
                     ? AnyLayout(VStackLayout(spacing: 6))
@@ -166,6 +163,21 @@ struct ReminderEditor: View {
                     dateShortcut(0, now: context.date)
                     dateShortcut(1, now: context.date)
                     dateShortcut(3, now: context.date)
+                    Button { timeFocused = false; pickingDate = true } label: {
+                        Image(systemName: "calendar")
+                            .font(.title3)
+                            .frame(minWidth: 44, minHeight: 56)
+                            .background(palette.canvas, in: RoundedRectangle(cornerRadius: 13))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Choose date, " + day.formatted(date: .complete, time: .omitted))
+                }
+                if ![0, 1, 3].contains(where: { offset in
+                    guard let shortcut = ReminderEditorDraft.shortcutDate(days: offset, now: context.date) else { return false }
+                    return Calendar.autoupdatingCurrent.isDate(day, inSameDayAs: shortcut)
+                }) {
+                    Text(day, format: .dateTime.weekday(.wide).month(.abbreviated).day().year())
+                        .font(.caption).foregroundStyle(palette.accent)
                 }
             }
             if let schedule = parsedSchedule, let date = schedule.dueDate() {
@@ -211,7 +223,7 @@ struct ReminderEditor: View {
                 }
             } label: {
                 VStack(spacing: 5) {
-                    Text(name).font(.caption.weight(.medium))
+                    Text(name).font(.caption2.weight(.medium)).lineLimit(1).minimumScaleFactor(0.75)
                     Text(date, format: .dateTime.month(.abbreviated).day()).font(.caption2)
                 }
                 .foregroundStyle(selected ? palette.paper : palette.ink)

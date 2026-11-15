@@ -56,14 +56,18 @@ struct NudgeHome: View {
             ReminderEditor(store: store, reminder: item.reminder, initialDay: item.initialDay)
                 .tint(palette.accent)
         }
-        .alert("Mark as done?", isPresented: Binding(
-            get: { pendingCompletion != nil },
-            set: { if !$0 { pendingCompletion = nil } }
-        ), presenting: pendingCompletion) { occurrence in
-            Button("Cancel", role: .cancel) {}
-            Button("Done") { Task { await store.done(occurrence, animation: reminderAnimation) } }
-        } message: { occurrence in
-            Text(completionMessage(for: occurrence))
+        .blur(radius: pendingCompletion == nil ? 0 : 3)
+        .allowsHitTesting(pendingCompletion == nil)
+        .accessibilityHidden(pendingCompletion != nil)
+        .overlay {
+            if let occurrence = pendingCompletion {
+                CompletionConfirmation(palette: palette, message: completionMessage(for: occurrence),
+                    cancel: { pendingCompletion = nil },
+                    confirm: {
+                        pendingCompletion = nil
+                        Task { await store.done(occurrence, animation: reminderAnimation) }
+                    })
+            }
         }
         .onChange(of: store.notificationOpen, initial: true) { _, request in
             guard let request, let reminder = store.reminders.first(where: {
@@ -103,6 +107,8 @@ struct NudgeHome: View {
 
 @MainActor
 private struct NudgeAgenda: View {
+    @ScaledMetric(relativeTo: .largeTitle) private var heroTimeSize = 38.0
+    @ScaledMetric(relativeTo: .headline) private var heroPeriodSize = 18.0
     @ObservedObject var store: ReminderStore
     let todayOnly: Bool
     let palette: NudgePalette
@@ -247,7 +253,11 @@ private struct NudgeAgenda: View {
                     reminderSection("Needs attention", icon: "bell.badge", items: due, now: now)
                     reminderSection("Snoozed", icon: "clock", items: snoozed, now: now)
                     if let next = upcoming.first {
-                        nextCard(next, now: now)
+                        if isExpanded(next, reminder: liveReminder(for: next)) {
+                            reminderSection("Up next", icon: "clock", items: [next], now: now)
+                        } else {
+                            nextCard(next, now: now)
+                        }
                     }
                     reminderSection(todayOnly ? (isToday ? "Later today" : "Later that day") : "Coming up", icon: "calendar",
                                     items: Array(upcoming.dropFirst()), now: now)
@@ -316,18 +326,16 @@ private struct NudgeAgenda: View {
             closeTime()
         } label: {
             HStack(spacing: 5) {
-                Text(label).font(.subheadline.weight(selected ? .semibold : .regular))
+                Text(label).font(.footnote.weight(selected ? .semibold : .regular))
                     .lineLimit(1).minimumScaleFactor(0.8)
-                Text(count.formatted()).font(.caption.weight(.semibold)).monospacedDigit()
+                Text(count.formatted()).font(.caption2.weight(.semibold)).monospacedDigit()
                     .padding(.horizontal, 6).padding(.vertical, 3)
                     .background(selected ? palette.coral : palette.canvas, in: Capsule())
             }
             .foregroundStyle(selected ? palette.ink : palette.secondary)
-            .frame(maxWidth: .infinity, minHeight: 44)
-            .overlay(alignment: .bottom) {
-                Rectangle().fill(selected ? palette.accent.opacity(0.55) : palette.line)
-                    .frame(height: selected ? 2 : 1)
-            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: completed ? .trailing : .leading)
+            .padding(.horizontal, 4)
+            .overlay(alignment: .bottom) { Rectangle().fill(palette.line).frame(height: 1) }
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -338,9 +346,9 @@ private struct NudgeAgenda: View {
         if !items.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text(title).font(.subheadline.weight(.semibold)).accessibilityAddTraits(.isHeader)
+                    Text(title).font(.footnote.weight(.semibold)).accessibilityAddTraits(.isHeader)
                     Spacer()
-                    Text(items.count.formatted()).font(.caption).foregroundStyle(palette.secondary)
+                    Text("\(items.count) " + (items.count == 1 ? "reminder" : "reminders")).font(.caption2).foregroundStyle(palette.secondary)
                 }
                 .padding(.horizontal, 3)
                 VStack(spacing: 0) {
@@ -448,8 +456,8 @@ private struct NudgeAgenda: View {
             layout {
                 Button { toggleTime(occurrence, current: current) } label: {
                     VStack(alignment: .leading, spacing: 7) {
-                        Text(current.date, style: .time)
-                            .font(.largeTitle.weight(.semibold).monospacedDigit())
+                        heroTime(current.date)
+                            .font(.system(size: heroTimeSize, weight: .semibold).monospacedDigit())
                             .lineLimit(1).minimumScaleFactor(0.75)
                         Text(reminder.title).font(.title3.weight(.semibold))
                         if reminder.preferences.repeatRule != .never {
@@ -498,6 +506,19 @@ private struct NudgeAgenda: View {
         .transition(.opacity)
     }
 
+    private func heroTime(_ date: Date) -> Text {
+        // Keep the phone's locale/12- or 24-hour preference; shrink only its day period.
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        var text = AttributedString(date.formatted(date: .omitted, time: .shortened))
+        for symbol in [formatter.amSymbol, formatter.pmSymbol] where !symbol.isEmpty {
+            if let range = text.range(of: symbol) {
+                text[range].font = .system(size: heroPeriodSize, weight: .semibold)
+            }
+        }
+        return Text(text)
+    }
+
     private func liveReminder(for occurrence: ReminderOccurrence) -> Reminder {
         store.reminders.first { $0.id == occurrence.reminder.id } ?? occurrence.reminder
     }
@@ -539,8 +560,6 @@ private struct NudgeAgenda: View {
                 Text("Adjust the current reminder from Today or Upcoming.")
                     .font(.footnote).foregroundStyle(palette.secondary)
             } else {
-                Text(occurrence.date <= now ? "Later options start from now." : "Tap again to keep adjusting.")
-                    .font(.footnote).foregroundStyle(palette.secondary)
                 Grid(alignment: .leading, horizontalSpacing: 7, verticalSpacing: 7) {
                     GridRow {
                         Text("Earlier")
@@ -554,6 +573,11 @@ private struct NudgeAgenda: View {
                         }
                     }
                 }
+            }
+            if reminder.completedAt == nil && !occurrence.isProjected {
+                Text(occurrence.date <= now ? "Later options start from now." : "Tap again to keep adjusting.")
+                    .font(.caption2).foregroundStyle(palette.secondary)
+                    .frame(maxWidth: .infinity).multilineTextAlignment(.center)
             }
             if let adjustmentIssue {
                 Text(adjustmentIssue).font(.footnote).foregroundStyle(palette.accent)
@@ -633,5 +657,67 @@ private struct NudgeAgenda: View {
         .frame(maxWidth: .infinity)
         .padding(22)
         .nudgePanel(palette)
+    }
+}
+
+
+@MainActor
+private struct CompletionConfirmation: View {
+    let palette: NudgePalette
+    let message: String
+    let cancel: () -> Void
+    let confirm: () -> Void
+    @AccessibilityFocusState private var headingFocused: Bool
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                Color.black.opacity(0.25).ignoresSafeArea()
+                ViewThatFits(in: .vertical) {
+                    content
+                    ScrollView { content }
+                }
+                .frame(maxWidth: 297)
+                .background(palette.paper, in: RoundedRectangle(cornerRadius: 23))
+                .clipShape(RoundedRectangle(cornerRadius: 23))
+                .padding(20)
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height)
+        }
+        .accessibilityAddTraits(.isModal)
+        .accessibilityAction(.escape, cancel)
+        .onAppear { headingFocused = true }
+    }
+
+    private var content: some View {
+        VStack(spacing: 0) {
+            VStack(spacing: 15) {
+                Image(systemName: "checkmark")
+                    .font(.title2.weight(.medium))
+                    .foregroundStyle(palette.accent)
+                    .frame(width: 43, height: 43)
+                    .background(palette.coral, in: Circle())
+                    .accessibilityHidden(true)
+                Text("Mark as done?")
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(palette.ink)
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityFocused($headingFocused)
+                Text(message).font(.caption).foregroundStyle(palette.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(25)
+            Divider().overlay(palette.line)
+            HStack(spacing: 0) {
+                Button("Cancel", role: .cancel, action: cancel)
+                    .font(.subheadline).foregroundStyle(palette.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 51)
+                Rectangle().fill(palette.line).frame(width: 1, height: 51)
+                Button("Done", action: confirm)
+                    .font(.subheadline.weight(.semibold)).foregroundStyle(palette.accent)
+                    .frame(maxWidth: .infinity, minHeight: 51)
+            }.buttonStyle(.plain)
+        }
     }
 }

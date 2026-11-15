@@ -21,17 +21,37 @@ struct NudgeSettings: View {
         return "Version \(info["CFBundleShortVersionString"] as? String ?? "?") (\(info["CFBundleVersion"] as? String ?? "?"))"
     }
 
+    private var backupPresentation: (title: String, detail: String, icon: String, color: Color) {
+        if let issue = store.storageIssue {
+            return ("Backup needs attention", issue, "exclamationmark.shield", palette.accent)
+        }
+        switch store.backupStatus {
+        case "Automatic backup is ready.", "Recovered your reminders from the automatic backup.":
+            return ("Automatic backup is on", "Recover your reminders if data is damaged.",
+                    "checkmark.shield", palette.green)
+        case "Automatic backup starts with your first saved reminder.":
+            return ("Automatic backup is on", "Starts with your first saved reminder.",
+                    "shield", palette.green)
+        case "Checking automatic backup…":
+            return ("Checking automatic backup…", "Checking your recovery copy.",
+                    "clock", palette.secondary)
+        default:
+            return ("Backup needs attention", store.backupStatus,
+                    "exclamationmark.shield", palette.accent)
+        }
+    }
+
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 16) {
                 NudgeHeading(eyebrow: "", title: "Settings", subtitle: "", icon: "", palette: palette)
                     .padding(.bottom, 2)
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("New reminder defaults").font(.subheadline.weight(.semibold)).accessibilityAddTraits(.isHeader)
+                    Text("New reminder defaults").font(.footnote.weight(.semibold)).accessibilityAddTraits(.isHeader)
                     PreferenceFields(preferences: $store.defaults, palette: palette, isDefaults: true)
                 }
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Notifications").font(.subheadline.weight(.semibold)).accessibilityAddTraits(.isHeader)
+                    Text("Notifications").font(.footnote.weight(.semibold)).accessibilityAddTraits(.isHeader)
                     VStack(spacing: 0) {
                         Button {
                             if let url = URL(string: UIApplication.openNotificationSettingsURLString) { openURL(url) }
@@ -42,11 +62,11 @@ struct NudgeSettings: View {
                         }.buttonStyle(.plain)
                         Divider().overlay(palette.line.opacity(0.5)).padding(.horizontal, 14)
                         NudgeSettingsRow(title: "Snooze", icon: "clock", palette: palette) {
-                            Text("15 minutes").font(.subheadline).foregroundStyle(palette.secondary)
+                            Text("15 minutes").font(.caption).foregroundStyle(palette.secondary)
                         }
                     }.nudgePanel(palette)
-                    Text("Reminders always request notifications. Sound and vibration follow your iPhone settings.")
-                        .font(.caption).foregroundStyle(palette.secondary).padding(.horizontal, 3)
+                    Text("Sound and vibration follow your iPhone settings.")
+                        .font(.caption2).foregroundStyle(palette.secondary).padding(.horizontal, 3)
                 }
                 NudgeSettingsRow(title: "Appearance", icon: "moon", palette: palette) {
                     Menu {
@@ -59,17 +79,30 @@ struct NudgeSettings: View {
                     .accessibilityLabel("Appearance, " + appearance.rawValue)
                 }.nudgePanel(palette)
                 VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Text("Backup").font(.subheadline.weight(.semibold)).accessibilityAddTraits(.isHeader)
-                        Spacer()
+                    Text("Backup").font(.footnote.weight(.semibold)).accessibilityAddTraits(.isHeader)
+                    VStack(alignment: .leading, spacing: 0) {
                         Button { showingBackupHelp = true } label: {
-                            Image(systemName: "info.circle").frame(width: 44, height: 44)
-                        }.buttonStyle(.plain).accessibilityLabel("About backup")
-                    }
-                    VStack(alignment: .leading, spacing: 12) {
-                        Label(store.backupStatus, systemImage: "checkmark.shield")
-                            .font(.subheadline).foregroundStyle(palette.green)
-                            .fixedSize(horizontal: false, vertical: true)
+                            HStack(spacing: 12) {
+                                Image(systemName: backupPresentation.icon)
+                                    .font(.system(size: 23, weight: .regular))
+                                    .foregroundStyle(backupPresentation.color)
+                                    .accessibilityHidden(true)
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(backupPresentation.title)
+                                        .font(.caption)
+                                        .foregroundStyle(backupPresentation.color)
+                                    Text(backupPresentation.detail)
+                                        .font(.caption2)
+                                        .foregroundStyle(palette.secondary)
+                                }
+                                .fixedSize(horizontal: false, vertical: true)
+                                Spacer(minLength: 0)
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .padding(.vertical, 16)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Show backup information")
                         Divider().overlay(palette.line)
                         HStack(spacing: 0) {
                             Button {
@@ -81,19 +114,21 @@ struct NudgeSettings: View {
                                 Label("Export", systemImage: "square.and.arrow.up")
                                     .frame(maxWidth: .infinity, minHeight: 44)
                             }
-                            Divider().frame(height: 22)
+                            Divider().frame(height: 20)
                             Button { importing = true } label: {
                                 Label("Import", systemImage: "square.and.arrow.down")
                                     .frame(maxWidth: .infinity, minHeight: 44)
                             }
                         }
-                        .font(.subheadline).buttonStyle(.plain).foregroundStyle(palette.green)
+                        .font(.caption).buttonStyle(.plain).foregroundStyle(palette.green)
                     }
-                    .padding(14).nudgePanel(palette, fill: palette.sage)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 6)
+                    .nudgePanel(palette, fill: palette.sage, radius: 18)
                 }
                 VStack(spacing: 7) {
                     Text(versionLabel).font(.caption)
-                    Text("Developed by Jason Wang").font(.footnote)
+                    Text("Developed by Jason Wang").font(.caption)
                 }
                 .foregroundStyle(palette.secondary)
                 .frame(maxWidth: .infinity)

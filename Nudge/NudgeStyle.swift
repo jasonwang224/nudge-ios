@@ -24,11 +24,11 @@ struct NudgePalette {
     var canvas: Color { color(0xf0f1eb, 0x20231f) }
     var surface: Color { color(0xffffff, 0x33382f) }
     var ink: Color { color(0x292e29, 0xf4f2e9) }
-    var secondary: Color { color(0x666a60, 0xb2b9a9) }
+    var secondary: Color { color(0x72766e, 0xb2b9a9) }
     var line: Color { color(0xe8e8df, 0x41473b) }
     var accent: Color { color(0xb74730, 0xf39479) }
     var coral: Color { color(0xf8e5dc, 0x5c3f34) }
-    var sage: Color { color(0xe9eee5, 0x3e4938) }
+    var sage: Color { color(0xeff2eb, 0x3e4938) }
     var green: Color { color(0x4e674b, 0xc2d9af) }
 
     private func color(_ light: UInt32, _ dark: UInt32) -> Color {
@@ -93,18 +93,18 @@ struct NudgeSettingsRow<Trailing: View>: View {
             : AnyLayout(HStackLayout(spacing: 10))
         layout {
             HStack(spacing: 10) {
-                Image(systemName: icon).font(.subheadline).foregroundStyle(palette.secondary)
+                Image(systemName: icon).font(.footnote).foregroundStyle(palette.secondary)
                     .frame(width: dynamicTypeSize.isAccessibilitySize ? nil : 22).accessibilityHidden(true)
-                Text(title).font(.subheadline).fixedSize(horizontal: false, vertical: true)
+                Text(title).font(.footnote).fixedSize(horizontal: false, vertical: true)
             }
             if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 6) }
             trailing()
-                .font(.subheadline)
+                .font(.footnote)
                 .fixedSize(horizontal: !dynamicTypeSize.isAccessibilitySize, vertical: true)
         }
         .foregroundStyle(palette.ink)
-        .padding(.horizontal, 14).padding(.vertical, 5)
-        .frame(minHeight: 50)
+        .padding(.horizontal, 14).padding(.vertical, 1)
+        .frame(minHeight: 47)
     }
 }
 
@@ -113,7 +113,7 @@ struct NudgeMenuValue: View {
     let palette: NudgePalette
     var body: some View {
         HStack(spacing: 6) {
-            Text(value).font(.subheadline).lineLimit(1).minimumScaleFactor(0.65)
+            Text(value).font(.caption).lineLimit(1).minimumScaleFactor(0.65)
             Image(systemName: "chevron.right").font(.caption2).accessibilityHidden(true)
         }
         .foregroundStyle(palette.secondary)
@@ -139,6 +139,7 @@ struct PreferenceFields: View {
     @Binding var preferences: ReminderPreferences
     let palette: NudgePalette
     var isDefaults = false
+    var showsHelp = true
     @State private var soundPreview = NudgeSoundPreview()
 
     var body: some View {
@@ -183,9 +184,11 @@ struct PreferenceFields: View {
                 }
             }
             .nudgePanel(palette)
-            Text(isDefaults ? "Applied to reminders you create next." : (preferences.nagMinutes == 0 ? "Nag me is off: one notification. Snooze pauses it for 15 minutes." : "Snooze pauses nags for 15 minutes."))
-                .font(.caption).foregroundStyle(palette.secondary)
-                .padding(.horizontal, 3)
+            if showsHelp {
+                Text(isDefaults ? "Applied to reminders you create next." : (preferences.nagMinutes == 0 ? "Nag me is off: one notification. Snooze pauses it for 15 minutes." : "Snooze pauses nags for 15 minutes."))
+                    .font(.caption2).foregroundStyle(palette.secondary)
+                    .padding(.horizontal, 3)
+            }
         }
         .onChange(of: preferences.sound) { _, sound in soundPreview.play(sound) }
     }
