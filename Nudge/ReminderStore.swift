@@ -208,7 +208,18 @@ final class ReminderStore: ObservableObject {
 
     private func loadDatabase() -> Bool {
         do {
-            let loaded = try database.read { backupStatus = $0 }
+            var loaded = try database.read { backupStatus = $0 }
+            if case .legacy(let existing) = loaded {
+                do {
+                    // Back up old-format installs immediately, without changing
+                    // any reminder identity, schedule, or cancellation metadata.
+                    loaded = try database.commit(existing, replacing: loaded)
+                    backupStatus = "Automatic backup is ready."
+                } catch {
+                    // Retain readable legacy data and retry on a later refresh.
+                    backupStatus = "Your reminders are readable, but automatic backup could not be created yet."
+                }
+            }
             switch loaded {
             case .missing:
                 if let source, source != .missing { throw ReminderDatabase.Problem.missing }
