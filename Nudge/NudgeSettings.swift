@@ -44,6 +44,7 @@ struct NudgeSettings: View {
                 .padding(15).nudgePanel(palette)
                 VStack(alignment: .leading, spacing: 12) {
                     Label("BACKUP", systemImage: "externaldrive").font(.caption.weight(.semibold))
+                    Text(store.backupStatus).font(.footnote).foregroundStyle(palette.secondary)
                     Text("Save your reminders, including completed items, to a JSON file. Import adds missing reminders and keeps your existing ones. Previously deleted reminders are skipped. App defaults and appearance stay unchanged.")
                         .font(.footnote).foregroundStyle(palette.secondary)
                     Button("Export reminders") {

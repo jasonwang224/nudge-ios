@@ -121,6 +121,7 @@ func checkDatabaseSafety() throws {
 
     let corrupt = Data("{\"version\":1,\"reminders\":[".utf8)
     try corrupt.write(to: database.url, options: .atomic)
+    try corrupt.write(to: database.recoveryURL, options: .atomic)
     expectFailure("corrupted primary is not an empty store") { _ = try database.read() }
     expectFailure("cannot overwrite corrupt bytes with a blank database") {
         _ = try database.commit(ReminderSnapshot(), replacing: saved)

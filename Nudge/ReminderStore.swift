@@ -18,6 +18,7 @@ final class ReminderStore: ObservableObject {
     @Published private(set) var status = "Checking notification access…"
     @Published private(set) var needsSettings = false
     @Published private(set) var storageIssue: String?
+    @Published private(set) var backupStatus = "Checking automatic backup…"
     @Published private(set) var schedulingIssue: String?
     @Published private(set) var isUpdatingNotifications = false
     @Published private(set) var soundOnlyEnabled = NagDelivery.enabled
@@ -207,7 +208,7 @@ final class ReminderStore: ObservableObject {
 
     private func loadDatabase() -> Bool {
         do {
-            let loaded = try database.read()
+            let loaded = try database.read { backupStatus = $0 }
             switch loaded {
             case .missing:
                 if let source, source != .missing { throw ReminderDatabase.Problem.missing }
@@ -226,6 +227,7 @@ final class ReminderStore: ObservableObject {
             source = nil
             verifiedEmpty = false
             storageIssue = Self.storageUnavailable
+            backupStatus = "Automatic recovery is unavailable. Existing saved files were kept."
             return false
         }
     }

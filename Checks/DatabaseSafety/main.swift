@@ -62,6 +62,7 @@ try rejectWithoutChangingDisk("stale overwrite after deletion", original, replac
 // A decoder failure must never authorize empty initialization or change the bad bytes.
 let damaged = Data("{\"version\":1,\"reminders\":[".utf8)
 try damaged.write(to: database.url, options: .atomic)
+try damaged.write(to: database.recoveryURL, options: .atomic)
 expectFailure("malformed primary") { _ = try database.read() }
 try rejectWithoutChangingDisk("cannot erase malformed primary", ReminderSnapshot(), replacing: deletedSource)
 let preservedDamage = try Data(contentsOf: database.url)
