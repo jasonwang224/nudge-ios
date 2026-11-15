@@ -668,14 +668,19 @@ private struct CompletionConfirmation: View {
     let cancel: () -> Void
     let confirm: () -> Void
     @AccessibilityFocusState private var headingFocused: Bool
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         GeometryReader { geometry in
             ZStack {
                 Color.black.opacity(0.25).ignoresSafeArea()
-                ViewThatFits(in: .vertical) {
-                    content
-                    ScrollView { content }
+                VStack(spacing: 0) {
+                    ViewThatFits(in: .vertical) {
+                        messageContent
+                        ScrollView { messageContent }
+                    }
+                    Divider().overlay(palette.line)
+                    actions
                 }
                 .frame(maxWidth: 297)
                 .background(palette.paper, in: RoundedRectangle(cornerRadius: 23))
@@ -689,39 +694,47 @@ private struct CompletionConfirmation: View {
         .onAppear { headingFocused = true }
     }
 
-    private var content: some View {
-        VStack(spacing: 0) {
-            VStack(spacing: 15) {
-                Image(systemName: "checkmark")
-                    .font(.title2.weight(.medium))
-                    .foregroundStyle(palette.accent)
-                    .frame(width: 43, height: 43)
-                    .background(palette.coral, in: Circle())
-                    .accessibilityHidden(true)
-                Text("Mark as done?")
-                    .font(.title3.weight(.bold))
-                    .foregroundStyle(palette.ink)
-                    .accessibilityAddTraits(.isHeader)
-                    .accessibilityFocused($headingFocused)
-                Text(message).font(.caption).foregroundStyle(palette.secondary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(25)
-            Divider().overlay(palette.line)
-            HStack(spacing: 0) {
-                Button(role: .cancel, action: cancel) {
-                    Text("Cancel").font(.subheadline).foregroundStyle(palette.secondary)
-                        .frame(maxWidth: .infinity, minHeight: 51)
-                        .contentShape(Rectangle())
-                }
-                Rectangle().fill(palette.line).frame(width: 1, height: 51)
-                Button(action: confirm) {
-                    Text("Done").font(.subheadline.weight(.semibold)).foregroundStyle(palette.accent)
-                        .frame(maxWidth: .infinity, minHeight: 51)
-                        .contentShape(Rectangle())
-                }
-            }.buttonStyle(.plain)
+    private var messageContent: some View {
+        VStack(spacing: 15) {
+            Image(systemName: "checkmark")
+                .font(.title2.weight(.medium))
+                .foregroundStyle(palette.accent)
+                .frame(width: 43, height: 43)
+                .background(palette.coral, in: Circle())
+                .accessibilityHidden(true)
+            Text("Mark as done?")
+                .font(.title3.weight(.bold))
+                .foregroundStyle(palette.ink)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityFocused($headingFocused)
+            Text(message).font(.caption).foregroundStyle(palette.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
         }
+        .padding(25)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var actions: some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(spacing: 0))
+            : AnyLayout(HStackLayout(spacing: 0))
+        return layout {
+            Button(role: .cancel, action: cancel) {
+                Text("Cancel").font(.subheadline).foregroundStyle(palette.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 51)
+                    .contentShape(Rectangle())
+            }
+            if dynamicTypeSize.isAccessibilitySize {
+                Rectangle().fill(palette.line).frame(height: 1)
+            } else {
+                Rectangle().fill(palette.line).frame(width: 1, height: 51)
+            }
+            Button(action: confirm) {
+                Text("Done").font(.subheadline.weight(.semibold)).foregroundStyle(palette.accent)
+                    .frame(maxWidth: .infinity, minHeight: 51)
+                    .contentShape(Rectangle())
+            }
+        }.buttonStyle(.plain)
     }
 }

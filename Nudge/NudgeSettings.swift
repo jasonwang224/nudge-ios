@@ -43,7 +43,7 @@ struct NudgeSettings: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 14) {
                 NudgeHeading(eyebrow: "", title: "Settings", subtitle: "", icon: "", palette: palette)
                     .padding(.bottom, 2)
                 VStack(alignment: .leading, spacing: 10) {
@@ -84,7 +84,7 @@ struct NudgeSettings: View {
                         Button { showingBackupHelp = true } label: {
                             HStack(spacing: 12) {
                                 Image(systemName: backupPresentation.icon)
-                                    .font(.system(size: 23, weight: .regular))
+                                    .font(.system(size: 20, weight: .regular))
                                     .foregroundStyle(backupPresentation.color)
                                     .accessibilityHidden(true)
                                 VStack(alignment: .leading, spacing: 5) {
@@ -99,11 +99,11 @@ struct NudgeSettings: View {
                                 Spacer(minLength: 0)
                             }
                             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                            .padding(.vertical, 16)
+                            .padding(.vertical, 4)
                         }
                         .buttonStyle(.plain)
                         .accessibilityHint("Show backup information")
-                        Divider().overlay(palette.line)
+                        Rectangle().fill(palette.green.opacity(0.16)).frame(height: 1)
                         HStack(spacing: 0) {
                             Button {
                                 do {
