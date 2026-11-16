@@ -36,3 +36,8 @@ for suite in Recovery DatabaseSafety Countdown Agenda AgendaUI Editor Lifecycle 
         -o "$check_dir/$suite-checks"
     "$check_dir/$suite-checks"
 done
+
+# Regression: notification response completion must stay on the main thread.
+xcrun swiftc "$root/Nudge/NotificationDelegateCompletion.swift" \
+    "$root/Checks/NotificationCompletion/main.swift" -o "$check_dir/notification-completion"
+"$check_dir/notification-completion"

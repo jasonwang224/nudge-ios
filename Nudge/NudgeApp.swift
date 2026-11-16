@@ -18,23 +18,31 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
-                                             didReceive response: UNNotificationResponse) async {
+                                             didReceive response: UNNotificationResponse,
+                                             withCompletionHandler completionHandler: @escaping () -> Void) {
         let time = Date()
         let payload = response.notification.request.content.userInfo
-        guard let id = payload["id"] as? String, let generation = payload["generation"] as? String else { return }
+        let id = payload["id"] as? String
+        let generation = payload["generation"] as? String
         let action = response.actionIdentifier
-        await ReminderStore.shared.handleAction(action, id: id, generation: generation, at: time)
+        NotificationDelegateCompletion.finish(after: {
+            guard let id, let generation else { return }
+            await ReminderStore.shared.handleAction(action, id: id, generation: generation, at: time)
+        }, completion: { _ in completionHandler() })
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
-                                             willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        if NotificationRequestFactory.isSoundOnly(notification.request.content) {
-            return [.sound]
-        }
-        if let incoming = NotificationRequestFactory.visibleNudge(notification) {
-            await Self.trimDeliveredNags(in: center, incoming: incoming)
-        }
-        return [.banner, .list, .sound]
+                                             willPresent notification: UNNotification,
+                                             withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        NotificationDelegateCompletion.finish(after: {
+            if NotificationRequestFactory.isSoundOnly(notification.request.content) {
+                return [.sound]
+            }
+            if let incoming = NotificationRequestFactory.visibleNudge(notification) {
+                await Self.trimDeliveredNags(in: center, incoming: incoming)
+            }
+            return [.banner, .list, .sound]
+        }, completion: completionHandler)
     }
 
     nonisolated static func trimDeliveredNags(in center: UNUserNotificationCenter, incoming: DeliveredNudge? = nil) async {
