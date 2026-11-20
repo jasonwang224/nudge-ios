@@ -44,11 +44,11 @@ Feed the cat. Make that call. Remember the thing you promised yourself you'd do.
   </tr>
 </table>
 
-<p align="center"><sub>Native simulator captures with sample reminders, from version 1.1.22 (34). Version 1.1.23 (35) keeps this design and fixes notification-tap handling. Version 1.1.24 adds a search field to Today and Upcoming; the captures below predate that field.</sub></p>
+<p align="center"><sub>Native simulator captures with sample reminders, from version 1.1.22 (34). Version 1.1.23 (35) keeps this design and fixes notification-tap handling. Version 1.1.25 lets you tap the sun or calendar icon to reveal search; these captures show the normal agenda layout.</sub></p>
 
 ## Small details that make a difference
 
-**Find it with a keyword.** Search reminder names and notes from Today or Upcoming. Results span all dates, with separate active and Completed filters. Matching ignores capitalization and accents; multiple words can match across a name and its notes. Clear or cancel to return to your agenda.
+**Find it with a keyword.** Tap the sun on Today or the calendar on Upcoming to reveal search for reminder names and notes. Results span all dates, with separate active and Completed filters. Matching ignores capitalization and accents; multiple words can match across a name and its notes. The search field stays hidden until you need it. Cancel or tap the decorative icon again to smoothly tuck it away.
 
 **A friendly face for what's next.** Bell Buddy blinks, looks around, and reacts with a little hop and wiggle when tapped. A live countdown underneath tells you how close your next reminder is.
 
@@ -102,9 +102,9 @@ The automatic copy is on the same device. Save an exported backup somewhere sepa
 
 ## Get the app
 
-**Latest IPA: 1.1.24 (36).** Targets iOS 17.4 and later; device testing has centered on the **iPhone 11 Pro running iOS 17.4.1**.
+**Latest IPA: 1.1.25 (37).** Targets iOS 17.4 and later; device testing has centered on the **iPhone 11 Pro running iOS 17.4.1**.
 
-1. Open the [latest successful IPA build](https://github.com/jasonwang224/nudge-ios/actions/workflows/ipa.yml) and download **Nudge-1.1.24-Unsigned** under Artifacts. Extract the ZIP to get the IPA. GitHub sign-in is required to download Actions artifacts; they expire after 14 days.
+1. Open the [latest successful IPA build](https://github.com/jasonwang224/nudge-ios/actions/workflows/ipa.yml) and download **Nudge-1.1.25-Unsigned** under Artifacts. Extract the ZIP to get the IPA. GitHub sign-in is required to download Actions artifacts; they expire after 14 days.
 2. Sign and install the IPA with your preferred sideloading tool. This is an unsigned sideload build, not an App Store download.
 3. Open the app, allow notifications, and enable Lock Screen alerts and Sounds in iPhone Settings. Choose your defaults and add a reminder.
 
@@ -114,6 +114,8 @@ Updating? Export a backup, then install over the existing app using the same sig
 
 <details>
 <summary><strong>What's new in the latest version?</strong></summary>
+
+Version **1.1.25 (37)** restores the decorative sun and calendar icons as search buttons. Tap one to reveal the search field and keyboard; Cancel or tap it again to collapse search. The page heading stays in place, and the field is hidden by default.
 
 Version **1.1.24 (36)** adds keyword search across reminder names and notes, including future reminders and completed history. Search results retain the existing adjustment, completion, edit, Snooze, and restore actions. Searching does not write to the reminder database or reschedule notifications.
 

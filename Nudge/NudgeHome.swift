@@ -217,7 +217,7 @@ private struct NudgeAgenda: View {
                 NudgeHeading(eyebrow: (todayOnly ? viewedDay : now).formatted(.dateTime.weekday(.wide).month(.wide).day()),
                              title: todayOnly ? (isToday ? "Today" : viewedDay.formatted(.dateTime.weekday(.wide))) : "Upcoming",
                              subtitle: "",
-                             icon: "magnifyingglass", palette: palette,
+                             icon: todayOnly ? "sun.max" : "calendar", palette: palette,
                              iconAction: { searchPresented ? dismissSearch() : revealSearch() },
                              iconLabel: searchPresented ? "Close search" : "Search reminders",
                              iconSelected: searchPresented)

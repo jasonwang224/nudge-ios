@@ -74,10 +74,10 @@ struct NudgeHeading: View {
             if let iconAction {
                 Button(action: iconAction) {
                     Image(systemName: icon)
-                        .font(.system(size: 20, weight: .medium))
-                        .foregroundStyle(iconSelected ? palette.accent : palette.secondary)
-                        .frame(width: 44, height: 44)
-                        .background(iconSelected ? palette.coral : palette.canvas, in: Circle())
+                        .font(.system(size: 25, weight: .light))
+                        .foregroundStyle(palette.accent)
+                        .frame(width: 46, height: 46)
+                        .background(palette.coral, in: RoundedRectangle(cornerRadius: 16))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(iconLabel)
