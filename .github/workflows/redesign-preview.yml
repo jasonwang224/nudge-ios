@@ -1,7 +1,7 @@
 name: Validate native redesign
 on:
   push:
-    branches: ['checks/redesign-20261115']
+    branches: ['checks/redesign-20261115', 'checks/search-20261119']
   workflow_dispatch:
 permissions:
   contents: read

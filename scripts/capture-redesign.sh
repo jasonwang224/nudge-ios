@@ -19,13 +19,14 @@ p=root/'Nudge/NudgeHome.swift'
 s=p.read_text()
 s=s.replace('@State private var tab: Tab = .today',
             '@State private var tab: Tab = (CommandLine.arguments.contains("--settings") || CommandLine.arguments.contains("--backup") || CommandLine.arguments.contains("--backup-warning")) ? .settings : (CommandLine.arguments.contains("--upcoming") ? .upcoming : .today)')
+s=s.replace('@State private var searchText = ""', '@State private var searchText = CommandLine.arguments.contains("--search-empty") ? "no-match-xyz" : (CommandLine.arguments.contains("--search-notes") ? "milk" : (CommandLine.arguments.contains("--search") || CommandLine.arguments.contains("--search-completed") ? "cat" : ""))')
 s=s.replace('@State private var editor: EditorItem?',
             '@State private var editor: EditorItem? = (CommandLine.arguments.contains("--editor") || CommandLine.arguments.contains("--custom") || CommandLine.arguments.contains("--calendar")) ? EditorItem() : nil')
 s=s.replace('@State private var pendingCompletion: ReminderOccurrence?',
     '@State private var pendingCompletion: ReminderOccurrence? = CommandLine.arguments.contains("--complete") ? ReminderStore.shared.reminders.first.map { ReminderOccurrence($0) } : nil')
 s=s.replace('.onReceive(Self.clock)', '.onAppear { if CommandLine.arguments.contains("--adjust"), let reminder = store.reminders.first { openTime(ReminderOccurrence(reminder)) } }\n        .onReceive(Self.clock)')
 s=s.replace('@State private var selectedDay: Date?', '@State private var selectedDay: Date? = CommandLine.arguments.contains("--future") ? Calendar.current.date(byAdding: .day, value: 3, to: .now) : nil')
-s=s.replace('@State private var showCompleted = false', '@State private var showCompleted = CommandLine.arguments.contains("--completed")')
+s=s.replace('@State private var showCompleted = false', '@State private var showCompleted = (CommandLine.arguments.contains("--completed") || CommandLine.arguments.contains("--search-completed"))')
 p.write_text(s)
 p=root/'Nudge/NudgeSettings.swift'
 s=p.read_text().replace('        .alert("About backup"', '        .defaultScrollAnchor((CommandLine.arguments.contains("--backup") || CommandLine.arguments.contains("--backup-warning")) ? .bottom : .top)\n        .alert("About backup"')
@@ -60,7 +61,7 @@ let calendar = Calendar.autoupdatingCurrent
 let now = Date.now
 let next = now.addingTimeInterval(25 * 60)
 func item(_ title: String, date: Date) -> Reminder {
-    var r = Reminder(title: title, notes: "", due: date, repeatAnchor: date, preferences: p)
+    var r = Reminder(title: title, notes: title == "Pick up groceries" ? "Buy oat milk" : "", due: date, repeatAnchor: date, preferences: p)
     let c = calendar.dateComponents([.hour, .minute], from: date)
     r.phoneSchedule = PhoneSchedule(day: date, hour: c.hour!, minute: c.minute!)
     return r
@@ -72,6 +73,9 @@ snapshot.reminders = [
     item("Clean litter", date: now.addingTimeInterval(90 * 60)),
     item("Brush Nova’s teeth", date: now.addingTimeInterval(120 * 60))
 ]
+var history = item("Feed cat", date: now.addingTimeInterval(-86400))
+history.completedAt = now.addingTimeInterval(-86300)
+snapshot.reminders.append(history)
 try JSONEncoder().encode(snapshot.validated()).write(to: URL(fileURLWithPath: CommandLine.arguments[1]))
 SWIFT
 models=(Reminder UpNextCountdown ReminderDatabase ReminderEditorDraft ReminderLifecycle AgendaPresentation NagDelivery NotificationRequestFactory FiveMinuteSchedule QuickAdjustmentSequence MinuteScheduleReplacement NotificationUpdateLog NotificationContentEquivalence)
@@ -79,7 +83,7 @@ sources=()
 for name in "${models[@]}"; do sources+=("$root/Nudge/$name.swift"); done
 xcrun swiftc -framework UserNotifications "${sources[@]}" "$tmp/main.swift" -o "$tmp/fixtures"
 "$tmp/fixtures" "$data/Library/Application Support/Nudge/Reminders-v1.json"
-for screen in today settings backup backup-warning editor calendar custom adjust complete upcoming future completed; do
+for screen in today settings backup backup-warning editor calendar custom adjust complete upcoming future completed search search-notes search-empty search-completed; do
   xcrun simctl terminate "$device" com.jasonwang224.nudge >/dev/null 2>&1 || true
   xcrun simctl launch "$device" com.jasonwang224.nudge "--$screen"
   sleep 3
@@ -107,3 +111,8 @@ xcrun simctl terminate "$device" com.jasonwang224.nudge >/dev/null 2>&1 || true
 xcrun simctl launch "$device" com.jasonwang224.nudge --complete
 sleep 3
 xcrun simctl io "$device" screenshot "$root/artifacts/redesign/complete-accessibility.png"
+
+xcrun simctl terminate "$device" com.jasonwang224.nudge >/dev/null 2>&1 || true
+xcrun simctl launch "$device" com.jasonwang224.nudge --search
+sleep 3
+xcrun simctl io "$device" screenshot "$root/artifacts/redesign/search-accessibility.png"

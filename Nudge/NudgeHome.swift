@@ -129,6 +129,11 @@ private struct NudgeAgenda: View {
     @State private var expandedTime: ExpandedTime?
     @State private var adjustmentIssue: String?
     @State private var scrollRequest: ReminderNotificationOpen?
+    @State private var searchText = ""
+    @FocusState private var searchFocused: Bool
+
+    private var isSearching: Bool { !ReminderSearch.terms(in: searchText).isEmpty }
+
 
     private struct ExpandedTime {
         let id: ReminderOccurrence.ID
@@ -163,6 +168,8 @@ private struct NudgeAgenda: View {
             if let reminder = store.reminders.first(where: {
                 $0.id == request.id && $0.generation == request.generation && $0.completedAt == nil
             }) {
+                searchText = ""
+                searchFocused = false
                 selectedDay = nil
                 showCompleted = false
                 pendingDelete = nil
@@ -193,7 +200,7 @@ private struct NudgeAgenda: View {
             return reminder
         }
         let presentation = AgendaPresentation(reminders: placed, todayOnly: todayOnly,
-                                             selectedDay: selectedDay, now: now, calendar: calendar)
+                                             selectedDay: selectedDay, now: now, calendar: calendar, searchText: searchText)
         let viewedDay = presentation.viewedDay
         let isToday = presentation.isToday
         let active = presentation.active
@@ -206,10 +213,15 @@ private struct NudgeAgenda: View {
         return ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 NudgeHeading(eyebrow: (todayOnly ? viewedDay : now).formatted(.dateTime.weekday(.wide).month(.wide).day()),
-                             title: todayOnly ? (isToday ? "Today" : viewedDay.formatted(.dateTime.weekday(.wide))) : "Upcoming",
+                             title: isSearching ? "Search" : todayOnly ? (isToday ? "Today" : viewedDay.formatted(.dateTime.weekday(.wide))) : "Upcoming",
                              subtitle: "",
                              icon: todayOnly ? "sun.max" : "calendar", palette: palette)
-                if todayOnly {
+                searchField
+                if isSearching {
+                    Text("All dates · Names and notes")
+                        .font(.caption).foregroundStyle(palette.secondary)
+                }
+                if todayOnly && !isSearching {
                     weekStrip(today: today, viewedDay: viewedDay, active: active, now: now, calendar: calendar)
                 }
                 if store.needsSettings {
@@ -244,7 +256,15 @@ private struct NudgeAgenda: View {
                     filterButton(todayOnly ? "Reminders" : "Scheduled", count: visible.count, completed: false)
                     filterButton("Completed", count: completed.count, completed: true)
                 }
-                if showCompleted {
+                if isSearching {
+                    let results = showCompleted ? completed.map { ReminderOccurrence($0) } : visible
+                    if results.isEmpty {
+                        searchEmptyState(otherCount: showCompleted ? visible.count : completed.count)
+                    } else {
+                        reminderSection(showCompleted ? "Completed results" : "Search results",
+                                        icon: "magnifyingglass", items: results, now: now)
+                    }
+                } else if showCompleted {
                     if completed.isEmpty { emptyState(completed: true) }
                     else { reminderSection("Completed", icon: "checkmark.circle", items: completed.map { ReminderOccurrence($0) }, now: now) }
                 } else if visible.isEmpty {
@@ -267,8 +287,12 @@ private struct NudgeAgenda: View {
             .padding(.vertical, 16)
             .animation(reminderAnimation, value: expandedTime?.id)
         }
+        .scrollDismissesKeyboard(.interactively)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            Button { newReminder(todayOnly ? viewedDay : nil) } label: {
+            Button {
+                searchFocused = false
+                newReminder(todayOnly && !isSearching ? viewedDay : nil)
+            } label: {
                 Label("New reminder", systemImage: "plus")
                     .font(.headline).lineLimit(1).minimumScaleFactor(0.65)
                     .foregroundStyle(palette.scheme == .dark ? palette.canvas : .white)
@@ -281,6 +305,67 @@ private struct NudgeAgenda: View {
             .background(palette.paper)
         }
         .foregroundStyle(palette.ink)
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundStyle(palette.secondary)
+                    .accessibilityHidden(true)
+                TextField("Search reminders", text: Binding(
+                    get: { searchText },
+                    set: { updateSearch($0) }
+                ))
+                .font(.body)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.search)
+                .focused($searchFocused)
+                .onSubmit { searchFocused = false }
+                .accessibilityLabel("Search reminder names and notes")
+                .accessibilityHint("Searches all dates. Use Reminders or Completed to choose results.")
+                if !searchText.isEmpty {
+                    Button { updateSearch("") } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(palette.secondary)
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear search")
+                }
+            }
+            .padding(.leading, 12).padding(.trailing, searchText.isEmpty ? 12 : 0)
+            .frame(minHeight: 44)
+            .nudgePanel(palette, fill: palette.canvas, radius: 13)
+            if searchFocused || !searchText.isEmpty {
+                Button("Cancel") {
+                    updateSearch("")
+                    searchFocused = false
+                }
+                .font(.body).frame(minHeight: 44)
+                .foregroundStyle(palette.accent)
+                .accessibilityLabel("Cancel search")
+            }
+        }
+    }
+
+    private func updateSearch(_ value: String) {
+        searchText = value
+        closeTime()
+        pendingDelete = nil
+    }
+
+    private func searchEmptyState(otherCount: Int) -> some View {
+        VStack(spacing: 10) {
+            Image(systemName: "magnifyingglass").font(.largeTitle.weight(.light))
+                .foregroundStyle(palette.secondary).accessibilityHidden(true)
+            Text("No matching reminders").font(.title3.weight(.semibold))
+            Text(otherCount > 0
+                 ? "Matches are available in " + (showCompleted ? "Reminders." : "Completed.")
+                 : "Try another word from the reminder's name or notes.")
+                .font(.subheadline).foregroundStyle(palette.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity).padding(22).nudgePanel(palette)
     }
 
     private func weekStrip(today: Date, viewedDay: Date, active: [Reminder], now: Date, calendar: Calendar) -> some View {
@@ -323,6 +408,7 @@ private struct NudgeAgenda: View {
         let selected = showCompleted == completed
         return Button {
             showCompleted = completed
+            searchFocused = false
             closeTime()
         } label: {
             HStack(spacing: 5) {
@@ -377,6 +463,7 @@ private struct NudgeAgenda: View {
         return VStack(spacing: 0) {
             HStack(spacing: 6) {
                 Button {
+                    searchFocused = false
                     if completed { store.restore(reminder) }
                     else { confirmCompletion(current) }
                 } label: {
@@ -528,6 +615,7 @@ private struct NudgeAgenda: View {
     }
 
     private func toggleTime(_ occurrence: ReminderOccurrence, current: ReminderOccurrence) {
+        searchFocused = false
         if isExpanded(occurrence, reminder: current.reminder) { closeTime() }
         else { openTime(current) }
     }
@@ -627,6 +715,7 @@ private struct NudgeAgenda: View {
                        systemImage: "arrow.uturn.backward") { store.restore(reminder) }
             } else {
                 Button(occurrence.isProjected ? "Edit repeating reminder" : "Edit", systemImage: "pencil") {
+                    searchFocused = false
                     closeTime()
                     editReminder(reminder)
                 }

@@ -31,6 +31,22 @@ struct ReminderNotificationOpen: Equatable {
     let token = UUID()
 }
 
+// Search is a read-only view: it never changes series, generations or alerts.
+enum ReminderSearch {
+    static func terms(in query: String) -> [String] {
+        query.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+    }
+
+    static func matches(_ reminder: Reminder, terms: [String]) -> Bool {
+        terms.allSatisfy { term in
+            [reminder.title, reminder.notes].contains { field in
+                field.range(of: term, options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive],
+                            locale: .autoupdatingCurrent) != nil
+            }
+        }
+    }
+}
+
 // A read-only snapshot shared by the date strip, filters, and agenda sections.
 struct AgendaPresentation {
     let viewedDay: Date
@@ -54,16 +70,19 @@ struct AgendaPresentation {
     }
 
     init(reminders: [Reminder], todayOnly: Bool, selectedDay: Date?, now: Date,
-         calendar: Calendar = .autoupdatingCurrent) {
+         calendar: Calendar = .autoupdatingCurrent, searchText: String = "") {
+        let terms = ReminderSearch.terms(in: searchText)
+        let searching = !terms.isEmpty
+        let matching = reminders.filter { ReminderSearch.matches($0, terms: terms) }
         let today = calendar.startOfDay(for: now)
         let day = max(today, selectedDay.map { calendar.startOfDay(for: $0) } ?? today)
         viewedDay = day
         isToday = calendar.isDate(day, inSameDayAs: today)
-        active = reminders.filter { $0.completedAt == nil }
+        active = matching.filter { $0.completedAt == nil }
         let viewedCompletionDay = ReminderDay(day, calendar: calendar)
-        completed = reminders.filter {
+        completed = matching.filter {
             guard let completedAt = $0.completedAt else { return false }
-            if !todayOnly { return true }
+            if !todayOnly || searching { return true }
             if let completedForDay = $0.completedForDay {
                 return completedForDay == viewedCompletionDay
             }
@@ -72,7 +91,7 @@ struct AgendaPresentation {
             if $0.completedAt == $1.completedAt { return $0.id.uuidString < $1.id.uuidString }
             return ($0.completedAt ?? .distantPast) > ($1.completedAt ?? .distantPast)
         }
-        visible = ReminderOccurrence.entries(reminders: active, on: todayOnly ? day : nil,
+        visible = ReminderOccurrence.entries(reminders: active, on: todayOnly && !searching ? day : nil,
                                              now: now, calendar: calendar)
         due = visible.filter { !$0.isProjected && $0.date <= now }
         snoozed = visible.filter { !$0.isProjected && $0.date > now && $0.reminder.snoozedUntil != nil }
