@@ -51,6 +51,9 @@ struct NudgeHeading: View {
     let subtitle: String
     let icon: String
     let palette: NudgePalette
+    var iconAction: (() -> Void)? = nil
+    var iconLabel: String = ""
+    var iconSelected = false
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -68,7 +71,18 @@ struct NudgeHeading: View {
                 }
             }
             Spacer(minLength: 0)
-            if !icon.isEmpty {
+            if let iconAction {
+                Button(action: iconAction) {
+                    Image(systemName: icon)
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundStyle(iconSelected ? palette.accent : palette.secondary)
+                        .frame(width: 44, height: 44)
+                        .background(iconSelected ? palette.coral : palette.canvas, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(iconLabel)
+                .accessibilityValue(iconSelected ? "Expanded" : "Collapsed")
+            } else if !icon.isEmpty {
                 Image(systemName: icon)
                     .font(.system(size: 25, weight: .light))
                     .foregroundStyle(palette.accent)

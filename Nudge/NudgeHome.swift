@@ -130,6 +130,7 @@ private struct NudgeAgenda: View {
     @State private var adjustmentIssue: String?
     @State private var scrollRequest: ReminderNotificationOpen?
     @State private var searchText = ""
+    @State private var searchPresented = false
     @FocusState private var searchFocused: Bool
 
     private var isSearching: Bool { !ReminderSearch.terms(in: searchText).isEmpty }
@@ -169,6 +170,7 @@ private struct NudgeAgenda: View {
                 $0.id == request.id && $0.generation == request.generation && $0.completedAt == nil
             }) {
                 searchText = ""
+                searchPresented = false
                 searchFocused = false
                 selectedDay = nil
                 showCompleted = false
@@ -213,10 +215,21 @@ private struct NudgeAgenda: View {
         return ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 NudgeHeading(eyebrow: (todayOnly ? viewedDay : now).formatted(.dateTime.weekday(.wide).month(.wide).day()),
-                             title: isSearching ? "Search" : todayOnly ? (isToday ? "Today" : viewedDay.formatted(.dateTime.weekday(.wide))) : "Upcoming",
+                             title: todayOnly ? (isToday ? "Today" : viewedDay.formatted(.dateTime.weekday(.wide))) : "Upcoming",
                              subtitle: "",
-                             icon: todayOnly ? "sun.max" : "calendar", palette: palette)
-                searchField
+                             icon: "magnifyingglass", palette: palette,
+                             iconAction: { searchPresented ? dismissSearch() : revealSearch() },
+                             iconLabel: searchPresented ? "Close search" : "Search reminders",
+                             iconSelected: searchPresented)
+                if searchPresented {
+                    searchField
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .task {
+                            await Task.yield()
+                            guard !Task.isCancelled, searchPresented else { return }
+                            searchFocused = true
+                        }
+                }
                 if isSearching {
                     Text("All dates · Names and notes")
                         .font(.caption).foregroundStyle(palette.secondary)
@@ -286,6 +299,7 @@ private struct NudgeAgenda: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 16)
             .animation(reminderAnimation, value: expandedTime?.id)
+            .animation(reminderAnimation, value: searchPresented)
         }
         .scrollDismissesKeyboard(.interactively)
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -328,7 +342,7 @@ private struct NudgeAgenda: View {
                 .accessibilityLabel("Search reminder names and notes")
                 .accessibilityHint("Searches all dates. Use Reminders or Completed to choose results.")
                 if !searchText.isEmpty {
-                    Button { updateSearch("") } label: {
+                    Button { updateSearch(""); searchFocused = true } label: {
                         Image(systemName: "xmark.circle.fill").foregroundStyle(palette.secondary)
                             .frame(width: 44, height: 44)
                     }
@@ -339,16 +353,23 @@ private struct NudgeAgenda: View {
             .padding(.leading, 12).padding(.trailing, searchText.isEmpty ? 12 : 0)
             .frame(minHeight: 44)
             .nudgePanel(palette, fill: palette.canvas, radius: 13)
-            if searchFocused || !searchText.isEmpty {
-                Button("Cancel") {
-                    updateSearch("")
-                    searchFocused = false
-                }
+            Button("Cancel", action: dismissSearch)
                 .font(.body).frame(minHeight: 44)
                 .foregroundStyle(palette.accent)
                 .accessibilityLabel("Cancel search")
-            }
         }
+    }
+
+    private func revealSearch() {
+        closeTime()
+        pendingDelete = nil
+        searchPresented = true
+    }
+
+    private func dismissSearch() {
+        searchFocused = false
+        updateSearch("")
+        searchPresented = false
     }
 
     private func updateSearch(_ value: String) {

@@ -17,6 +17,8 @@ import sys
 root=Path(sys.argv[1])
 p=root/'Nudge/NudgeHome.swift'
 s=p.read_text()
+s=s.replace('@State private var searchPresented = false', '@State private var searchPresented = CommandLine.arguments.contains { $0.hasPrefix("--search") }')
+s=s.replace('searchFocused = true', 'searchFocused = CommandLine.arguments.contains("--search-open")')
 s=s.replace('@State private var tab: Tab = .today',
             '@State private var tab: Tab = (CommandLine.arguments.contains("--settings") || CommandLine.arguments.contains("--backup") || CommandLine.arguments.contains("--backup-warning")) ? .settings : (CommandLine.arguments.contains("--upcoming") ? .upcoming : .today)')
 s=s.replace('@State private var searchText = ""', '@State private var searchText = CommandLine.arguments.contains("--search-empty") ? "no-match-xyz" : (CommandLine.arguments.contains("--search-notes") ? "milk" : (CommandLine.arguments.contains("--search") || CommandLine.arguments.contains("--search-completed") ? "cat" : ""))')
@@ -83,7 +85,7 @@ sources=()
 for name in "${models[@]}"; do sources+=("$root/Nudge/$name.swift"); done
 xcrun swiftc -framework UserNotifications "${sources[@]}" "$tmp/main.swift" -o "$tmp/fixtures"
 "$tmp/fixtures" "$data/Library/Application Support/Nudge/Reminders-v1.json"
-for screen in today settings backup backup-warning editor calendar custom adjust complete upcoming future completed search search-notes search-empty search-completed; do
+for screen in today settings backup backup-warning editor calendar custom adjust complete upcoming future completed search search-open search-notes search-empty search-completed; do
   xcrun simctl terminate "$device" com.jasonwang224.nudge >/dev/null 2>&1 || true
   xcrun simctl launch "$device" com.jasonwang224.nudge "--$screen"
   sleep 3
