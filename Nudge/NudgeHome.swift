@@ -308,7 +308,10 @@ private struct NudgeAgenda: View {
     }
 
     private var searchField: some View {
-        HStack(spacing: 8) {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(spacing: 8))
+        return layout {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass").foregroundStyle(palette.secondary)
                     .accessibilityHidden(true)
