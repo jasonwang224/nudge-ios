@@ -102,9 +102,9 @@ The automatic copy is on the same device. Save an exported backup somewhere sepa
 
 ## Get the app
 
-**Latest IPA: 1.1.25 (37).** Targets iOS 17.4 and later; device testing has centered on the **iPhone 11 Pro running iOS 17.4.1**.
+**Latest IPA: 1.1.26 (38).** Targets iOS 17.4 and later; device testing has centered on the **iPhone 11 Pro running iOS 17.4.1**.
 
-1. Open the [latest successful IPA build](https://github.com/jasonwang224/nudge-ios/actions/workflows/ipa.yml) and download **Nudge-1.1.25-Unsigned** under Artifacts. Extract the ZIP to get the IPA. GitHub sign-in is required to download Actions artifacts; they expire after 14 days.
+1. Open the [latest successful IPA build](https://github.com/jasonwang224/nudge-ios/actions/workflows/ipa.yml) and download **Nudge-1.1.26-Unsigned** under Artifacts. Extract the ZIP to get the IPA. GitHub sign-in is required to download Actions artifacts; they expire after 14 days.
 2. Sign and install the IPA with your preferred sideloading tool. This is an unsigned sideload build, not an App Store download.
 3. Open the app, allow notifications, and enable Lock Screen alerts and Sounds in iPhone Settings. Choose your defaults and add a reminder.
 
@@ -114,6 +114,8 @@ Updating? Export a backup, then install over the existing app using the same sig
 
 <details>
 <summary><strong>What's new in the latest version?</strong></summary>
+
+Version **1.1.26 (38)** adds a keyboard Done button for reminder names and notes. Finishing time entry displays the selected AM or PM beside the formatted time, such as 3:00 PM. Tap the time to edit it again; Done dismisses the keyboard without saving the reminder.
 
 Version **1.1.25 (37)** restores the decorative sun and calendar icons as search buttons. Tap one to reveal the search field and keyboard; Cancel or tap it again to collapse search. The page heading stays in place, and the field is hidden by default.
 

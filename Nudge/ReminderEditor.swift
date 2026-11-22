@@ -17,7 +17,8 @@ struct ReminderEditor: View {
     @State private var didSave = false
     @State private var pickingDate = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @FocusState private var timeFocused: Bool
+    private enum EditorField: Hashable { case title, notes, time }
+    @FocusState private var focusedField: EditorField?
     @ScaledMetric(relativeTo: .title2) private var titleSize = 25.0
 
     init(store: ReminderStore, reminder: Reminder?, initialDay: Date? = nil) {
@@ -51,6 +52,7 @@ struct ReminderEditor: View {
                         Text("What would you like to remember?")
                             .font(.caption).foregroundStyle(palette.secondary)
                         TextField("Reminder name", text: $title, axis: .vertical)
+                            .focused($focusedField, equals: .title)
                             .font(.system(size: titleSize, weight: .medium)).lineLimit(1...3)
                             .accessibilityLabel("Reminder title")
                         Divider().overlay(palette.line)
@@ -60,6 +62,7 @@ struct ReminderEditor: View {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack(alignment: .top) {
                             TextField("Add a note", text: $notes, axis: .vertical)
+                                .focused($focusedField, equals: .notes)
                                 .font(.footnote).lineLimit(1...4)
                                 .accessibilityLabel("Reminder note")
                             if notes.isEmpty {
@@ -101,12 +104,12 @@ struct ReminderEditor: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItemGroup(placement: .keyboard) {
-                    if timeFocused {
-                        Spacer()
-                        Button("Done") {
+                    Spacer()
+                    Button("Done") {
+                        if focusedField == .time {
                             time = ReminderEditorDraft.formattedTime(time) ?? time
-                            timeFocused = false
                         }
+                        focusedField = nil
                     }
                 }
             }
@@ -134,6 +137,33 @@ struct ReminderEditor: View {
             && (preferences.repeatRule != .custom || !preferences.weekdays.isEmpty)
     }
 
+    private var timeInput: some View {
+        let displayTime = focusedField == .time ? nil : ReminderEditorDraft.formattedTime(time)
+        return ZStack(alignment: .leading) {
+            // Keep the numeric field mounted so tapping the display can focus it immediately.
+            TextField("– – : – –", text: $time)
+                .keyboardType(.numberPad)
+                .focused($focusedField, equals: .time)
+                .font(.largeTitle.weight(.medium).monospacedDigit())
+                .opacity(displayTime == nil ? 1 : 0)
+                .accessibilityHidden(displayTime != nil)
+                .accessibilityLabel("Reminder time")
+            if let displayTime {
+                Button { focusedField = .time } label: {
+                    (Text(displayTime) + Text(isPM ? " PM" : " AM").font(.title3.weight(.medium)))
+                        .font(.largeTitle.weight(.medium).monospacedDigit())
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Reminder time")
+                .accessibilityValue(displayTime + (isPM ? " PM" : " AM"))
+                .accessibilityHint("Double-tap to edit the time")
+            }
+        }
+    }
+
     private var scheduleCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Time").font(.footnote.weight(.semibold))
@@ -141,11 +171,7 @@ struct ReminderEditor: View {
                 ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
                 : AnyLayout(HStackLayout(spacing: 12))
             layout {
-                TextField("– – : – –", text: $time)
-                    .keyboardType(.numberPad)
-                    .focused($timeFocused)
-                    .font(.largeTitle.weight(.medium).monospacedDigit())
-                    .accessibilityLabel("Reminder time")
+                timeInput
                 Picker("AM or PM", selection: $isPM) {
                     Text("AM").tag(false)
                     Text("PM").tag(true)
@@ -163,7 +189,7 @@ struct ReminderEditor: View {
                     dateShortcut(0, now: context.date)
                     dateShortcut(1, now: context.date)
                     dateShortcut(3, now: context.date)
-                    Button { timeFocused = false; pickingDate = true } label: {
+                    Button { focusedField = nil; pickingDate = true } label: {
                         Image(systemName: "calendar")
                             .font(.title3)
                             .frame(minWidth: 44, minHeight: 56)
