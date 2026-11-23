@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://jasonwang224.github.io/nudge-ios/"><strong>Visit the showcase →</strong></a>
+  <a href="https://hijasonwang.com/nudge-ios/"><strong>Visit the showcase →</strong></a>
   &nbsp; · &nbsp;
   <a href="#get-nudge"><strong>Get the IPA →</strong></a>
   &nbsp; · &nbsp;
