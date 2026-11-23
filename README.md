@@ -2,7 +2,7 @@
   <img src="Nudge/Assets.xcassets/AppIcon.appiconset/Nudge.png" width="88" height="88" alt="Smiling Bell Buddy app icon">
 </p>
 
-<h1 align="center">The app</h1>
+<h1 align="center">Nudge</h1>
 
 <p align="center"><strong>Less to remember. More room for your day.</strong></p>
 
@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="#get-the-app"><strong>Get the IPA →</strong></a>
+  <a href="#get-nudge"><strong>Get the IPA →</strong></a>
   &nbsp; · &nbsp;
   <a href="#small-details-that-make-a-difference">Explore the features</a>
   &nbsp; · &nbsp;
@@ -24,7 +24,7 @@
 
 Feed the cat. Make that call. Remember the thing you promised yourself you'd do.
 
-**Give it a time, and let the app keep track.** A calm Today view, reminders that fit your routines, and a friendly Bell Buddy make it easier to see what's next and get on with your day.
+**Give it a time, and let Nudge keep track.** A calm Today view, reminders that fit your routines, and a friendly Bell Buddy make it easier to see what's next and get on with your day.
 
 <table>
   <tr>
@@ -71,7 +71,7 @@ Feed the cat. Make that call. Remember the thing you promised yourself you'd do.
 
 **Keep your routines, one day at a time.** Repeat daily, on weekdays, weekly, monthly, yearly, or on selected weekdays. The Today date strip shows future occurrences too. Mark one occurrence Done—even on a future date—and the rest of the series continues. Upcoming gives you a broader view; Completed keeps your history and lets you restore an occurrence.
 
-**Need another reminder? Set the pace.** Choose Nag Me every **1, 2, 5, 10, 15, 20, or 30 minutes**, or Off. Continuous nags can reuse one Lock Screen card per reminder while the app is closed, starting at the reminder time. This depends on available notification space and iOS support; see [how delivery works](#how-delivery-works).
+**Need another reminder? Set the pace.** Choose Nag Me every **1, 2, 5, 10, 15, 20, or 30 minutes**, or Off. Continuous nags can reuse one Lock Screen card per reminder while Nudge is closed, starting at the reminder time. This depends on available notification space and iOS support; see [how delivery works](#how-delivery-works).
 
 **A little later, without starting over.** Tap a reminder row to expand its time menu. Move it earlier or later by **5 minutes, 1 hour, or 1 day**; the displayed time updates and the menu stays open for more adjustments. Tap the row again to collapse it. Full editing stays under the three dots.
 
@@ -109,19 +109,19 @@ Feed the cat. Make that call. Remember the thing you promised yourself you'd do.
 
 ## Your reminders, protected
 
-**Automatic recovery is built in.** The app keeps a verified recovery copy on the same iPhone. If the main database is missing or damaged and a valid recovery copy is available, it restores your reminders automatically. If safe recovery isn't possible, it shows a storage warning instead of silently starting with an empty list.
+**Automatic recovery is built in.** Nudge keeps a verified recovery copy on the same iPhone. If the main database is missing or damaged and a valid recovery copy is available, it restores your reminders automatically. If safe recovery isn't possible, it shows a storage warning instead of silently starting with an empty list.
 
 **Take a separate backup with you.** Settings → Backup offers **Export** and **Import** using JSON files. Export includes active and completed reminders, their individual settings, and stored completion history. Import validates the file and adds missing reminders; existing and previously deleted reminders are skipped. Your current app defaults and appearance stay unchanged.
 
-The automatic copy is on the same device. Save an exported backup somewhere separate, such as iCloud Drive, to protect against deleting the app or losing the phone. The version/build number and **Developed by Jason Wang** credit appear at the bottom of Settings.
+The automatic copy is on the same device. Save an exported backup somewhere separate, such as iCloud Drive, to protect against deleting Nudge or losing the phone. The version/build number and **Developed by Jason Wang** credit appear at the bottom of Settings.
 
-## Get the app
+## Get Nudge
 
 **Latest IPA: 1.1.26 (38).** Targets iOS 17.4 and later; device testing has centered on the **iPhone 11 Pro running iOS 17.4.1**.
 
 1. Open the [latest successful IPA build](https://github.com/jasonwang224/nudge-ios/actions/workflows/ipa.yml) and download **Nudge-1.1.26-Unsigned** under Artifacts. Extract the ZIP to get the IPA. GitHub sign-in is required to download Actions artifacts; they expire after 14 days.
 2. Sign and install the IPA with your preferred sideloading tool. This is an unsigned sideload build, not an App Store download.
-3. Open the app, allow notifications, and enable Lock Screen alerts and Sounds in iPhone Settings. Choose your defaults and add a reminder.
+3. Open Nudge, allow notifications, and enable Lock Screen alerts and Sounds in iPhone Settings. Choose your defaults and add a reminder.
 
 Updating? Export a backup, then install over the existing app using the same signing account and app identifier. Open it once after installation.
 
@@ -136,7 +136,7 @@ Version **1.1.25 (37)** restores the decorative sun and calendar icons as search
 
 Version **1.1.24 (36)** adds keyword search across reminder names and notes, including future reminders and completed history. Search results retain the existing adjustment, completion, edit, Snooze, and restore actions. Searching does not write to the reminder database or reschedule notifications.
 
-Version **1.1.23 (35)** fixes the notification-response callback implicated in an intermittent crash when opening the app from an alert. Completion now runs on the main thread after action handling finishes. Automated checks passed, including 200 background-callback cases and the existing scheduling, interaction, database safety, and recovery suites. Confirming the intermittent crash is resolved on iOS 17.4.1 still requires device testing.
+Version **1.1.23 (35)** fixes the notification-response callback implicated in an intermittent crash when opening Nudge from an alert. Completion now runs on the main thread after action handling finishes. Automated checks passed, including 200 background-callback cases and the existing scheduling, interaction, database safety, and recovery suites. Confirming the intermittent crash is resolved on iOS 17.4.1 still requires device testing.
 
 The latest design also includes the larger animated Bell Buddy, live countdown, redesigned editor and settings, completion confirmation, automatic recovery, and import/export. The callback fix retains the existing database and scheduling code.
 
@@ -145,12 +145,12 @@ The latest design also includes the larger animated Bell Buddy, live countdown, 
 <details id="how-delivery-works">
 <summary><strong>How delivery works</strong></summary>
 
-- **The app can be closed.** Alerts are scheduled with iOS ahead of time. Presentation and sound still depend on notification permissions, Focus, Silent mode, and the phone's settings.
+- **Nudge can be closed.** Alerts are scheduled with iOS ahead of time. Presentation and sound still depend on notification permissions, Focus, Silent mode, and the phone's settings.
 - **One card is supported, but capacity matters.** One-minute nags use one repeating scheduled entry. Other intervals use staggered hourly repeats that share a reminder's notification identifier: 2 minutes needs 30 entries; 5 needs 12; 10 needs 6; 15 needs 4; 20 needs 3; 30 needs 2. These entries keep repeating without consuming more space each hour.
-- **The budget is shared across reminders.** The app uses a budget of 60 pending entries at a time, including reminders scheduled for future dates. When a continuous group won't fit, it can fall back to a limited queue of separate alerts, which may stack. The app displays a capacity warning. The fallback queue is replenished when the app opens or handles an action; it isn't an unlimited closed-app schedule.
+- **The budget is shared across reminders.** Nudge uses a budget of 60 pending entries at a time, including reminders scheduled for future dates. When a continuous group won't fit, it can fall back to a limited queue of separate alerts, which may stack. Nudge displays a capacity warning. The fallback queue is replenished when Nudge opens or handles an action; it isn't an unlimited closed-app schedule.
 - **Continuous nags use legacy/internal iOS notification interfaces.** Single-card behavior has been tested on iOS 17.4.1; support on other iOS versions isn't guaranteed. This implementation is intended for sideload testing.
 - **A repeating routine advances when you finish its current occurrence.** A daily reminder can keep nagging about today's task until you complete or snooze it. Future dates in Today show planned occurrences, not a separate scheduled alarm for every date. Completing a future occurrence skips only that date when the series advances.
-- **Calendar changes need care.** Open the app after changing the phone's calendar system. If daylight saving skips a selected time, the editor explains the adjusted time.
+- **Calendar changes need care.** Open Nudge after changing the phone's calendar system. If daylight saving skips a selected time, the editor explains the adjusted time.
 
 </details>
 
