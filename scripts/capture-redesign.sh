@@ -23,7 +23,7 @@ s=s.replace('@State private var tab: Tab = .today',
             '@State private var tab: Tab = (CommandLine.arguments.contains("--settings") || CommandLine.arguments.contains("--backup") || CommandLine.arguments.contains("--backup-warning")) ? .settings : (CommandLine.arguments.contains("--upcoming") ? .upcoming : .today)')
 s=s.replace('@State private var searchText = ""', '@State private var searchText = CommandLine.arguments.contains("--search-empty") ? "no-match-xyz" : (CommandLine.arguments.contains("--search-notes") ? "milk" : (CommandLine.arguments.contains("--search") || CommandLine.arguments.contains("--search-completed") ? "cat" : ""))')
 s=s.replace('@State private var editor: EditorItem?',
-            '@State private var editor: EditorItem? = (CommandLine.arguments.contains("--editor") || CommandLine.arguments.contains("--custom") || CommandLine.arguments.contains("--calendar")) ? EditorItem() : nil')
+            '@State private var editor: EditorItem? = (CommandLine.arguments.contains("--editor") || CommandLine.arguments.contains("--editor-filled") || CommandLine.arguments.contains("--custom") || CommandLine.arguments.contains("--calendar")) ? EditorItem() : nil')
 s=s.replace('@State private var pendingCompletion: ReminderOccurrence?',
     '@State private var pendingCompletion: ReminderOccurrence? = CommandLine.arguments.contains("--complete") ? ReminderStore.shared.reminders.first.map { ReminderOccurrence($0) } : nil')
 s=s.replace('.onReceive(Self.clock)', '.onAppear { if CommandLine.arguments.contains("--adjust"), let reminder = store.reminders.first { openTime(ReminderOccurrence(reminder)) } }\n        .onReceive(Self.clock)')
@@ -40,6 +40,8 @@ s=s.replace('if phase == .active { store.refresh() }', '')
 p.write_text(s)
 p=root/'Nudge/ReminderEditor.swift'
 s=p.read_text().replace('reminder?.title ?? ""', 'reminder?.title ?? "Pick up groceries"')
+s=s.replace('? "" : String(format:', '? (CommandLine.arguments.contains("--editor-filled") ? "3:00" : "") : String(format:')
+s=s.replace('_isPM = State(initialValue: hour >= 12)', '_isPM = State(initialValue: CommandLine.arguments.contains("--editor-filled") || hour >= 12)')
 s=s.replace('@State private var pickingDate = false', '@State private var pickingDate = CommandLine.arguments.contains("--calendar")')
 s=s.replace('initialPreferences.notifications = true' , 'initialPreferences.notifications = true; if CommandLine.arguments.contains("--custom") { initialPreferences.repeatRule = .custom }')
 p.write_text(s)
@@ -85,7 +87,7 @@ sources=()
 for name in "${models[@]}"; do sources+=("$root/Nudge/$name.swift"); done
 xcrun swiftc -framework UserNotifications "${sources[@]}" "$tmp/main.swift" -o "$tmp/fixtures"
 "$tmp/fixtures" "$data/Library/Application Support/Nudge/Reminders-v1.json"
-for screen in today settings backup backup-warning editor calendar custom adjust complete upcoming future completed search search-open search-notes search-empty search-completed; do
+for screen in today settings backup backup-warning editor editor-filled calendar custom adjust complete upcoming future completed search search-open search-notes search-empty search-completed; do
   xcrun simctl terminate "$device" com.jasonwang224.nudge >/dev/null 2>&1 || true
   xcrun simctl launch "$device" com.jasonwang224.nudge "--$screen"
   sleep 3
