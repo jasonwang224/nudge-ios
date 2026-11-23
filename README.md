@@ -34,7 +34,7 @@ Feed the cat. Make that call. Remember the thing you promised yourself you'd do.
   </tr>
   <tr>
     <td align="center"><img src="docs/images/app-today.png" width="270" alt="Native Today screen with a seven-day date strip, Bell Buddy, an Up Next countdown, and reminders"></td>
-    <td align="center"><img src="docs/images/app-editor.png" width="270" alt="Native reminder editor with blank time entry, AM/PM, date shortcuts, repeat, Nag Me, sound, and notes"></td>
+    <td align="center"><img src="docs/images/app-editor.png" width="270" alt="Native reminder editor showing 3:00 PM, the AM/PM switch, date shortcuts, repeat, Nag Me, sound, and notes"></td>
     <td align="center"><img src="docs/images/app-settings.png" width="270" alt="Native Settings screen with defaults, appearance, automatic backup, import and export, version, and developer credit"></td>
   </tr>
   <tr>
@@ -44,15 +44,30 @@ Feed the cat. Make that call. Remember the thing you promised yourself you'd do.
   </tr>
 </table>
 
-<p align="center"><sub>Native simulator captures with sample reminders, from version 1.1.22 (34). Version 1.1.23 (35) keeps this design and fixes notification-tap handling. Version 1.1.25 lets you tap the sun or calendar icon to reveal search; these captures show the normal agenda layout.</sub></p>
+<p align="center"><sub>Fresh native iPhone 11 Pro simulator captures from version 1.1.26 (38), using sample reminders. Screenshots show the real app UI; example titles and dates are illustrative.</sub></p>
 
 ## Small details that make a difference
 
 **Find it with a keyword.** Tap the sun on Today or the calendar on Upcoming to reveal search for reminder names and notes. Results span all dates, with separate active and Completed filters. Matching ignores capitalization and accents; multiple words can match across a name and its notes. The search field stays hidden until you need it. Cancel or tap the decorative icon again to smoothly tuck it away.
 
+<table>
+  <tr>
+    <td align="center" width="50%"><strong>Search when you need it</strong></td>
+    <td align="center" width="50%"><strong>See beyond today</strong></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/images/app-search.png" width="270" alt="Expanded keyword search beneath the Today heading, with the original sun icon and a matching reminder"></td>
+    <td align="center"><img src="docs/images/app-upcoming.png" width="270" alt="Upcoming screen showing active reminders beyond today and the calendar icon that opens search"></td>
+  </tr>
+  <tr>
+    <td align="center">Tap the decorative icon to open search. Cancel to tuck it away.</td>
+    <td align="center">Find your next plans and adjust them in place.</td>
+  </tr>
+</table>
+
 **A friendly face for what's next.** Bell Buddy blinks, looks around, and reacts with a little hop and wiggle when tapped. A live countdown underneath tells you how close your next reminder is.
 
-**Type 300. Get 3:00.** New reminders start with a blank time field and a number pad. Press Done to format the time, choose AM or PM, and pick Today, Tomorrow, the upcoming weekday shortcut, or any date from the calendar. Add a note for the details you don't want to forget.
+**Type 300. See 3:00 PM.** New reminders start with a blank time field and a number pad. Select AM or PM, then tap Done to format the time and show the selected period beside it. Tap the time to edit again. The reminder-name and notes keyboards also have Done buttons that close the keyboard without saving or leaving the editor. Pick Today, Tomorrow, the upcoming weekday shortcut, or any date from the calendar.
 
 **Keep your routines, one day at a time.** Repeat daily, on weekdays, weekly, monthly, yearly, or on selected weekdays. The Today date strip shows future occurrences too. Mark one occurrence Done—even on a future date—and the rest of the series continues. Upcoming gives you a broader view; Completed keeps your history and lets you restore an occurrence.
 
